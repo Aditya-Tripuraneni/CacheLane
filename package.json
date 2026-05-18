@@ -1,0 +1,33 @@
+{
+  "name": "cachelane",
+  "version": "0.0.1",
+  "description": "Cache-aware prompt orchestration for Claude Code",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@anthropic-ai/tokenizer": "^0.0.4",
+    "better-sqlite3": "^11.0.0",
+    "ulid": "^2.3.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^20.14.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^9.0.0",
+    "eslint-plugin-import": "^2.29.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  }
+}
