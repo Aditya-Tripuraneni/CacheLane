@@ -36,4 +36,16 @@ describe("countTokens", () => {
     const long = countTokens("Hello ".repeat(100), "claude-opus-4-7");
     expect(long).toBeGreaterThan(short);
   });
+
+  // M1 gate (Systems Design §11.1): "Tokenizer model-lookup test passes
+  // for 4.6 and 4.7." Verifies 4.7 produces a higher count than 4.6 for
+  // identical input. The multiplier is approximate (see ADR-011); M3
+  // reconciles against usage.input_tokens from real API responses.
+  it("M1 gate: 4.7 produces a higher count than 4.6 for the same input", () => {
+    // A non-trivial sample so the rounded multiplier is observable.
+    const sample = "The quick brown fox jumps over the lazy dog. ".repeat(20);
+    const count46 = countTokens(sample, "claude-opus-4-6");
+    const count47 = countTokens(sample, "claude-opus-4-7");
+    expect(count47).toBeGreaterThan(count46);
+  });
 });
