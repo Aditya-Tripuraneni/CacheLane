@@ -1,5 +1,5 @@
 function escapeForRegExp(literal: string): string {
-  return literal.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  return literal.replace(/[.?+^${}()|[\]\\]/g, "\\$&");
 }
 
 function patternToRegExp(pattern: string): RegExp {
@@ -8,9 +8,15 @@ function patternToRegExp(pattern: string): RegExp {
   while (i < pattern.length) {
     const ch = pattern[i];
     if (ch === "*" && pattern[i + 1] === "*") {
-      const sep = pattern[i + 2] === "/" ? 3 : 2;
-      body += ".*";
-      i += sep;
+      if (pattern[i + 2] === "/") {
+        // `**/` matches zero or more path segments, preserving the segment
+        // boundary so `**/CLAUDE.md` does not match `MY_CLAUDE.md`.
+        body += "(?:.*/)?";
+        i += 3;
+      } else {
+        body += ".*";
+        i += 2;
+      }
       continue;
     }
     if (ch === "*") {

@@ -37,26 +37,10 @@ const systemPromptRule: Rule = (i) =>
     ? { kind: "system_prompt", signals: ["system_prompt"] }
     : null;
 
-const toolSchemaRule: Rule = (i) => {
-  if (i.kindHint === "tool_schema") {
-    return { kind: "tool_schema", signals: ["tool_schema"] };
-  }
-  if (!i.content) return null;
-  try {
-    const parsed: unknown = JSON.parse(i.content);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "name" in parsed &&
-      "input_schema" in parsed
-    ) {
-      return { kind: "tool_schema", signals: ["tool_schema"] };
-    }
-  } catch {
-    // not JSON; not a tool schema
-  }
-  return null;
-};
+const toolSchemaRule: Rule = (i) =>
+  i.kindHint === "tool_schema"
+    ? { kind: "tool_schema", signals: ["tool_schema"] }
+    : null;
 
 const fileReadRule: Rule = (i) =>
   i.toolName === "Read" && i.filePath && typeof i.mtimeMs === "number"

@@ -1,6 +1,7 @@
 {
   "input": {
     "content": "{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}",
+    "kindHint": "tool_schema",
     "turnNumber": 0,
     "currentTurn": 0
   },

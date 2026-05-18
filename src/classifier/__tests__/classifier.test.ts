@@ -39,7 +39,7 @@ const FIXTURES = [
   "14_default_fallback",
   "15_sliding_window_n_minus_2",
   "16_sliding_window_out",
-  "17_stable_no_mtime",
+  "17_file_read_missing_mtime_degrades",
 ];
 
 describe.each(FIXTURES)("classifier fixture %s", (name) => {
@@ -136,5 +136,58 @@ describe("fail-open", () => {
       is_pinned: false,
       signals: ["error:fallback"],
     });
+  });
+
+  it("returns a fresh fallback object so callers cannot leak mutations", () => {
+    // Copilot review: returning a shared module-level constant means a caller
+    // who mutates result.signals leaks the change into all later fallbacks.
+    const badConfig = {
+      pin: null,
+      exclude: [],
+      sliding_window_turns: 4,
+    } as unknown as ClassifierConfig;
+    const input = {
+      content: "x",
+      role: "user" as const,
+      filePath: "/repo/foo",
+      turnNumber: 0,
+      currentTurn: 0,
+    };
+    const a = classifyBlock(input, badConfig);
+    const b = classifyBlock(input, badConfig);
+    expect(a).not.toBe(b);
+    expect(a?.signals).not.toBe(b?.signals);
+    a?.signals.push("mutated");
+    expect(b?.signals).toEqual(["error:fallback"]);
+  });
+});
+
+describe("tool_schema rule precedence (Copilot review)", () => {
+  it("does not misclassify a file_read of a JSON file with name + input_schema keys", () => {
+    // A Read tool result returning JSON content that happens to have top-level
+    // `name` and `input_schema` keys must NOT land in the STABLE prefix as a
+    // tool_schema. That would put mutable file contents into the cached prefix.
+    // The tool_schema rule should only fire when the caller has marked the
+    // block with kindHint: "tool_schema" (i.e. it came from the API tools[]
+    // field), not from a tool_result.
+    const config: ClassifierConfig = {
+      pin: [],
+      exclude: [],
+      sliding_window_turns: 4,
+    };
+    const result = classifyBlock(
+      {
+        content: '{"name":"thing","input_schema":{"type":"object"}}',
+        role: "tool",
+        toolName: "Read",
+        filePath: "/repo/schemas/thing.json",
+        mtimeMs: 1700000000000,
+        turnNumber: 1,
+        currentTurn: 1,
+      },
+      config,
+    );
+    expect(result?.kind).toBe("file_read");
+    expect(result?.volatility).toBe("SEMI");
   });
 });

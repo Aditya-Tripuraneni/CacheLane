@@ -14,12 +14,14 @@ export type {
   UnclassifiedBlock,
 } from "./types.js";
 
-const ERROR_FALLBACK: Classification = {
-  kind: "user_message",
-  volatility: "VOLATILE",
-  is_pinned: false,
-  signals: ["error:fallback"],
-};
+function makeErrorFallback(): Classification {
+  return {
+    kind: "user_message",
+    volatility: "VOLATILE",
+    is_pinned: false,
+    signals: ["error:fallback"],
+  };
+}
 
 export function classifyBlock(
   input: UnclassifiedBlock,
@@ -59,7 +61,7 @@ export function classifyBlock(
       signals,
     };
   } catch {
-    return ERROR_FALLBACK;
+    return makeErrorFallback();
   }
 }
 

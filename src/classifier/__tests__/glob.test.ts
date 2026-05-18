@@ -28,4 +28,22 @@ describe("globMatch", () => {
   it("returns false on invalid pattern without throwing", () => {
     expect(globMatch(null as unknown as string, "/repo/foo")).toBe(false);
   });
+
+  it("**/ requires a path-segment boundary (does not match a basename suffix)", () => {
+    // Copilot review: `^.*CLAUDE\.md$` wrongly matches `MY_CLAUDE.md`.
+    // The `**/` translation must preserve the segment boundary while still
+    // allowing zero directories (the basename-only case is already covered above).
+    expect(globMatch("**/CLAUDE.md", "MY_CLAUDE.md")).toBe(false);
+    expect(globMatch("**/CLAUDE.md", "/repo/sub/MY_CLAUDE.md")).toBe(false);
+    expect(globMatch("**/.env", "/repo/my.env")).toBe(false);
+  });
+
+  it("escapes literal ? so it does not act as a regex quantifier", () => {
+    // Copilot review: an unescaped `?` makes the preceding char optional,
+    // so `file?.ts` would match `file.ts`. Glob `?` is not a supported
+    // wildcard in this matcher; `?` must be treated as a literal.
+    expect(globMatch("file?.ts", "file.ts")).toBe(false);
+    expect(globMatch("file?.ts", "fileX.ts")).toBe(false);
+    expect(globMatch("file?.ts", "file?.ts")).toBe(true);
+  });
 });
