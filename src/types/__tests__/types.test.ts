@@ -14,66 +14,98 @@ describe("types", () => {
     expect(values).toHaveLength(3);
   });
 
-  it("TtlClass union contains exactly short | long", () => {
-    const values: TtlClass[] = ["short", "long"];
+  it("TtlClass union contains exactly 5m | 1h", () => {
+    const values: TtlClass[] = ["5m", "1h"];
     expect(values).toHaveLength(2);
   });
 
-  it("BlockKind union covers all 9 kinds", () => {
+  it("BlockKind union covers all 11 kinds", () => {
     const values: BlockKind[] = [
       "system_prompt",
       "tool_schema",
-      "project_rule",
+      "claude_md",
+      "project_rules",
       "prior_turn",
+      "tool_use_result_pair",
       "file_read",
+      "retrieval_result",
       "tool_output",
-      "retrieval",
       "user_message",
       "stub",
     ];
-    expect(values).toHaveLength(9);
+    expect(values).toHaveLength(11);
   });
 
-  it("Block is constructable with required fields only", () => {
+  it("Block is constructable with all required snake_case fields", () => {
     const block: Block = {
       id: "01HZXQ5K0000000000000001",
+      workspace_id: "ws-abc",
+      session_id: "sess-1",
       kind: "file_read",
       volatility: "SEMI",
-      tokenCount: 1234,
-      contentHash: "a".repeat(64),
-      unusedTurns: 0,
-      isStub: false,
+      is_pinned: false,
+      content_hash: "a".repeat(64),
+      token_count: 1234,
+      added_at_turn: 2,
+      last_referenced_at_turn: 2,
+      unused_turns: 0,
+      is_stub: false,
+      stub_summary: null,
+      refetch_handle: null,
     };
     expect(block.volatility).toBe("SEMI");
-    expect(block.refetchHandle).toBeUndefined();
+    expect(block.refetch_handle).toBeNull();
   });
 
-  it("Block with optional refetchHandle is constructable", () => {
+  it("Block representing a materialised stub", () => {
     const stub: Block = {
       id: "01HZXQ5K0000000000000002",
+      workspace_id: "ws-abc",
+      session_id: "sess-1",
       kind: "stub",
       volatility: "VOLATILE",
-      tokenCount: 50,
-      contentHash: "b".repeat(64),
-      unusedTurns: 3,
-      isStub: true,
-      refetchHandle: "view:auth.py:23-89",
+      is_pinned: false,
+      content_hash: "b".repeat(64),
+      token_count: 50,
+      added_at_turn: 1,
+      last_referenced_at_turn: 1,
+      unused_turns: 3,
+      is_stub: true,
+      stub_summary: "Read auth.py:23-89 (1.2 KB elided)",
+      refetch_handle: "view:auth.py:23-89",
     };
-    expect(stub.refetchHandle).toBe("view:auth.py:23-89");
+    expect(stub.is_stub).toBe(true);
+    expect(stub.refetch_handle).toBe("view:auth.py:23-89");
+    expect(stub.stub_summary).toContain("auth.py");
   });
 
-  it("PrefixState is constructable", () => {
+  it("PrefixState is constructable with 5m TTL", () => {
     const state: PrefixState = {
-      workspaceId: "ws-abc",
-      prefixHash: "c".repeat(64),
-      middleHash: "d".repeat(64),
-      prefixTokenCount: 8000,
-      ttlClass: "short",
-      cachedAtMs: 1715000000000,
-      lastReadAtMs: 1715000010000,
-      expectedExpiryMs: 1715000300000,
+      workspace_id: "ws-abc",
+      prefix_hash: "c".repeat(64),
+      middle_hash: "d".repeat(64),
+      prefix_token_count: 8000,
+      ttl_class: "5m",
+      cached_at_ms: 1715000000000,
+      last_read_at_ms: 1715000010000,
+      expected_expiry_ms: 1715000300000,
     };
-    expect(state.ttlClass).toBe("short");
+    expect(state.ttl_class).toBe("5m");
+  });
+
+  it("PrefixState accepts null middle_hash before the second breakpoint lands", () => {
+    const state: PrefixState = {
+      workspace_id: "ws-abc",
+      prefix_hash: "e".repeat(64),
+      middle_hash: null,
+      prefix_token_count: 8000,
+      ttl_class: "1h",
+      cached_at_ms: 1715000000000,
+      last_read_at_ms: 1715000010000,
+      expected_expiry_ms: 1715003600000,
+    };
+    expect(state.middle_hash).toBeNull();
+    expect(state.ttl_class).toBe("1h");
   });
 
   it("ReferenceType union covers all 3 reference kinds", () => {

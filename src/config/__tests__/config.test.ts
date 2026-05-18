@@ -29,7 +29,10 @@ describe("loadConfig", () => {
     expect(config.keepalive.idle_threshold_seconds).toBe(240);
     expect(config.keepalive.large_prefix_threshold_tokens).toBe(50000);
     expect(config.classification.sliding_window_turns).toBe(4);
+    expect(config.classification.pin).toEqual([]);
+    expect(config.classification.exclude).toEqual([]);
     expect(config.telemetry.opt_in).toBe(false);
+    expect(config.telemetry.endpoint).toBe("");
     expect(config.log_level).toBe("info");
     expect(fs.existsSync(configPath)).toBe(true);
   });
@@ -37,7 +40,7 @@ describe("loadConfig", () => {
   it("loads valid existing config unchanged", () => {
     const configPath = path.join(tmpDir, "config.json");
     const custom: CachelaneConfig = {
-      version: CURRENT_CONFIG_VERSION,
+      version: 1,
       pruner: { enabled: true, k: 5, mode: "conservative" },
       keepalive: {
         policy: "static",
@@ -45,8 +48,12 @@ describe("loadConfig", () => {
         idle_threshold_seconds: 300,
         large_prefix_threshold_tokens: 60000,
       },
-      classification: { sliding_window_turns: 6 },
-      telemetry: { opt_in: false },
+      classification: {
+        pin: ["src/**/*.ts"],
+        exclude: ["**/node_modules/**"],
+        sliding_window_turns: 6,
+      },
+      telemetry: { opt_in: false, endpoint: "" },
       log_level: "debug",
     };
     fs.writeFileSync(configPath, JSON.stringify(custom));
@@ -54,6 +61,8 @@ describe("loadConfig", () => {
     const config = loadConfig(configPath);
     expect(config.pruner.k).toBe(5);
     expect(config.pruner.mode).toBe("conservative");
+    expect(config.classification.pin).toEqual(["src/**/*.ts"]);
+    expect(config.classification.exclude).toEqual(["**/node_modules/**"]);
     expect(config.log_level).toBe("debug");
   });
 
@@ -69,6 +78,30 @@ describe("loadConfig", () => {
     );
   });
 
+  it("rejects version != 1 via Zod literal", () => {
+    // Older or non-numeric versions are caught by the Zod literal check;
+    // a newer version is caught by the explicit pre-check above. This test
+    // exercises the Zod path (version=0, still numeric, but not literal 1).
+    const configPath = path.join(tmpDir, "config.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        version: 0,
+        pruner: { enabled: true, k: 3, mode: "default" },
+        keepalive: {
+          policy: "auto",
+          interval_seconds: 150,
+          idle_threshold_seconds: 240,
+          large_prefix_threshold_tokens: 50000,
+        },
+        classification: { pin: [], exclude: [], sliding_window_turns: 4 },
+        telemetry: { opt_in: false, endpoint: "" },
+        log_level: "info",
+      })
+    );
+    expect(() => loadConfig(configPath)).toThrow(/config validation failed/i);
+  });
+
   it("falls back to defaults when config JSON is malformed", () => {
     const configPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(configPath, "{ not valid json }");
@@ -81,7 +114,7 @@ describe("loadConfig", () => {
   it("rejects pruner.k outside range 1–10", () => {
     const configPath = path.join(tmpDir, "config.json");
     const invalid: CachelaneConfig = {
-      version: CURRENT_CONFIG_VERSION,
+      version: 1,
       pruner: { enabled: true, k: 99, mode: "default" },
       keepalive: {
         policy: "auto",
@@ -89,8 +122,8 @@ describe("loadConfig", () => {
         idle_threshold_seconds: 240,
         large_prefix_threshold_tokens: 50000,
       },
-      classification: { sliding_window_turns: 4 },
-      telemetry: { opt_in: false },
+      classification: { pin: [], exclude: [], sliding_window_turns: 4 },
+      telemetry: { opt_in: false, endpoint: "" },
       log_level: "info",
     };
     fs.writeFileSync(configPath, JSON.stringify(invalid));

@@ -7,7 +7,7 @@ import type { CachelaneConfig } from "../types/index.js";
 export { CURRENT_CONFIG_VERSION } from "./defaults.js";
 
 const configSchema = z.object({
-  version: z.number().int().positive(),
+  version: z.literal(1),
   pruner: z.object({
     enabled: z.boolean(),
     k: z.number().int().min(1).max(10),
@@ -20,10 +20,13 @@ const configSchema = z.object({
     large_prefix_threshold_tokens: z.number().int().positive(),
   }),
   classification: z.object({
+    pin: z.array(z.string()).default([]),
+    exclude: z.array(z.string()).default([]),
     sliding_window_turns: z.number().int().positive(),
   }),
   telemetry: z.object({
     opt_in: z.boolean(),
+    endpoint: z.string().default(""),
   }),
   log_level: z.enum(["trace", "debug", "info", "warn", "error"]),
 });

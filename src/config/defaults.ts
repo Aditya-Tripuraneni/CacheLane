@@ -16,10 +16,13 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     large_prefix_threshold_tokens: 50000,
   },
   classification: {
+    pin: [],
+    exclude: [],
     sliding_window_turns: 4,
   },
   telemetry: {
     opt_in: false,
+    endpoint: "",
   },
   log_level: "info",
 };
