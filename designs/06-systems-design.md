@@ -93,61 +93,75 @@ Violations **block merge**.
 
 #### `blocks` table
 
+> **Convention:** storage and API-contract types use `snake_case`. In-process working types
+> may use `camelCase`. Rule of thumb: if it crosses a process/storage/network boundary,
+> snake_case.
+
 ```sql
 CREATE TABLE blocks (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  volatility TEXT NOT NULL,    -- "STABLE" | "SEMI" | "VOLATILE"
-  token_count INTEGER NOT NULL,
-  content_hash TEXT NOT NULL,
-  unused_turns INTEGER NOT NULL DEFAULT 0,
-  is_stub INTEGER NOT NULL DEFAULT 0,
-  refetch_handle TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL,
+  session_id      TEXT NOT NULL,
+  content_hash    TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  volatility      TEXT NOT NULL,            -- "STABLE" | "SEMI" | "VOLATILE"
+  is_pinned       INTEGER NOT NULL DEFAULT 0,
+  token_count     INTEGER NOT NULL,
+  added_at_turn   INTEGER NOT NULL,
+  last_referenced_at_turn INTEGER NOT NULL,
+  unused_turns    INTEGER NOT NULL DEFAULT 0,
+  is_stub         INTEGER NOT NULL DEFAULT 0,
+  stub_summary    TEXT,
+  refetch_handle  TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
 );
-CREATE INDEX idx_blocks_workspace_session ON blocks(workspace_id, session_id);
-CREATE INDEX idx_blocks_content_hash ON blocks(content_hash);
-CREATE INDEX idx_blocks_unused ON blocks(unused_turns) WHERE is_stub = 0;
+CREATE INDEX idx_blocks_session ON blocks(workspace_id, session_id);
+CREATE INDEX idx_blocks_hash    ON blocks(content_hash);
+CREATE INDEX idx_blocks_unused  ON blocks(unused_turns) WHERE is_stub = 0;
 ```
 
 #### `turns` table
 
 ```sql
 CREATE TABLE turns (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  turn_number INTEGER NOT NULL,
-  cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER NOT NULL DEFAULT 0,
-  effective_cost_units REAL NOT NULL,
-  prefix_breakpoint_hash TEXT,
-  middle_breakpoint_hash TEXT,
-  pruned_blocks_count INTEGER NOT NULL DEFAULT 0,
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL,
+  session_id      TEXT NOT NULL,
+  turn_number     INTEGER NOT NULL,
+  model           TEXT NOT NULL,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_creation_5m_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_creation_1h_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens          INTEGER NOT NULL DEFAULT 0,
+  effective_cost_units       REAL NOT NULL,
+  prefix_breakpoint_hash     TEXT,
+  middle_breakpoint_hash     TEXT,
+  pruned_blocks_count        INTEGER NOT NULL DEFAULT 0,
   keepalive_pings_since_last_turn INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  UNIQUE (workspace_id, session_id, turn_number)
+  created_at      INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX idx_turns_session_num ON turns(workspace_id, session_id, turn_number);
 ```
 
 **Effective cost formula (stored at write time):**
-`effective_cost_units = input_tokens + 1.25×cache_creation_5m + 2.0×cache_creation_1h + 0.1×cache_read`
+`effective_cost_units = input_tokens + 1.25 × cache_creation_5m + 2.0 × cache_creation_1h + 0.1 × cache_read`
 
 #### `block_references` table (append-only audit log)
 
 ```sql
 CREATE TABLE block_references (
-  id TEXT PRIMARY KEY,
-  block_id TEXT NOT NULL REFERENCES blocks(id),
-  turn_id TEXT NOT NULL REFERENCES turns(id),
-  reference_type TEXT NOT NULL  -- "tool_call" | "text_quote" | "id_mention"
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  block_id        TEXT NOT NULL REFERENCES blocks(id),
+  turn_id         TEXT NOT NULL REFERENCES turns(id),
+  reference_type  TEXT NOT NULL,    -- "tool_call" | "text_quote" | "id_mention"
+  evidence        TEXT NOT NULL,    -- short string showing what matched
+  created_at      INTEGER NOT NULL
 );
--- 90-day retention cap
+CREATE INDEX idx_refs_block ON block_references(block_id);
+CREATE INDEX idx_refs_turn  ON block_references(turn_id);
+-- 90-day retention cap (enforced at write time once retention job lands; M4+)
 ```
 
 ### Retention Policy

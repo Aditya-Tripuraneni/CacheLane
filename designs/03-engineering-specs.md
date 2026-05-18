@@ -94,7 +94,7 @@
 | REQ-NF-010 | Cache-stability assertion | Request bodies byte-identical (SHA-256) from prompt start through `cache_control` breakpoint across 3 consecutive identical-input runs | §6.2 |
 | REQ-NF-011 | Hot-path performance characterisation | Orchestrator work is microseconds (1 SHA-256 + 1 classification + 1 SQLite write); network is the bottleneck | §1.2.1 |
 | REQ-NF-012 | CI cache-stability scenarios | **≥ 5 scenarios** (empty/large tool schemas, middle present/empty, active-pruning stub-just-created) | §6.2 |
-| REQ-NF-013 | PR scope hard limit | **≤ 800 lines of net new code** (excludes generated test fixtures + lockfile) | §6.5 |
+| REQ-NF-013 | _removed_ — PR LOC cap not enforced (M1 scaffolding bundle grandfathered; project decided to drop this guardrail) | _n/a_ | §6.5 (waived) |
 | REQ-NF-014 | Tests included in same PR | No "follow-up test" merges | §6.5 |
 | REQ-NF-015 | Reviewer time budget | 30 min/PR; up to 90 min for cache-stability or pruner PRs | §6.6 |
 | REQ-NF-016 | Total v1.0 human review time target | **~18 hours** across 2–3 calendar weeks | §3.4.3 |
@@ -196,43 +196,79 @@ cachelane uninstall [--purge]
 
 ## Data Models
 
+> **Convention:** storage and API-contract types use `snake_case` (e.g. the `Block` interface
+> below, the `blocks/turns/block_references` rows, and `CachelaneConfig` fields). In-process
+> working types (function parameters, request payloads handled in code) may use `camelCase`.
+> Rule of thumb: if it crosses a process / storage / network boundary, snake_case.
+
 ### Entity: Block (in-memory, transient)
 
 ```typescript
 interface Block {
-  id: string;              // ULID; injected on every stubbable block
-  kind: BlockKind;         // system_prompt | tool_schema | project_rule | prior_turn |
-                           // file_read | tool_output | retrieval | user_message | stub
-  volatility: Volatility;  // "STABLE" | "SEMI" | "VOLATILE"
-  tokenCount: number;
-  contentHash: string;     // SHA-256; used for breakpoint stability check
-  unusedTurns: number;     // increments each turn if not referenced
-  isStub: boolean;
-  refetchHandle?: string;  // e.g. "view:auth.py:23-89"
-  // content: never persisted to disk
+  // Identity
+  id: string;                       // ULID; assigned on first observation
+  workspace_id: string;             // Claude Code workspace identifier
+  session_id: string;               // Claude Code session identifier
+
+  // Classification
+  kind: BlockKind;                  // see enum below — 11 values
+  volatility: Volatility;           // "STABLE" | "SEMI" | "VOLATILE"
+  is_pinned: boolean;               // true if matched by config.classification.pin
+
+  // Content (transient; never persisted)
+  // content: AnthropicContentBlock — deferred to M2 (no consumer in M1)
+  content_hash: string;             // SHA-256 of canonical serialization
+
+  // Accounting
+  token_count: number;              // tokens under the current model's tokenizer
+  added_at_turn: number;            // turn number when first observed
+  last_referenced_at_turn: number;  // turn number of most recent reference
+  unused_turns: number;             // counter for K-pruning; starts at 0
+
+  // Stub state
+  is_stub: boolean;                 // true if currently materialized as a stub
+  stub_summary: string | null;      // one-line summary if stubbed; else null
+  refetch_handle: string | null;    // tool invocation to restore content
 }
+
+type BlockKind =
+  | "system_prompt"
+  | "tool_schema"
+  | "claude_md"
+  | "project_rules"
+  | "prior_turn"
+  | "tool_use_result_pair"
+  | "file_read"
+  | "retrieval_result"
+  | "tool_output"
+  | "user_message"
+  | "stub";
 ```
 
 ### Entity: ReferenceLog row (SQLite `blocks` table)
 
 ```sql
 CREATE TABLE blocks (
-  id TEXT PRIMARY KEY,         -- ULID
-  workspace_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  volatility TEXT NOT NULL,    -- "STABLE" | "SEMI" | "VOLATILE"
-  token_count INTEGER NOT NULL,
-  content_hash TEXT NOT NULL,
-  unused_turns INTEGER NOT NULL DEFAULT 0,
-  is_stub INTEGER NOT NULL DEFAULT 0,  -- 0/1 boolean
-  refetch_handle TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  id              TEXT PRIMARY KEY,         -- ULID
+  workspace_id    TEXT NOT NULL,
+  session_id      TEXT NOT NULL,
+  content_hash    TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  volatility      TEXT NOT NULL,            -- "STABLE" | "SEMI" | "VOLATILE"
+  is_pinned       INTEGER NOT NULL DEFAULT 0,
+  token_count     INTEGER NOT NULL,
+  added_at_turn   INTEGER NOT NULL,
+  last_referenced_at_turn INTEGER NOT NULL,
+  unused_turns    INTEGER NOT NULL DEFAULT 0,
+  is_stub         INTEGER NOT NULL DEFAULT 0,
+  stub_summary    TEXT,
+  refetch_handle  TEXT,
+  created_at      INTEGER NOT NULL,
+  updated_at      INTEGER NOT NULL
 );
-CREATE INDEX idx_blocks_workspace_session ON blocks(workspace_id, session_id);
-CREATE INDEX idx_blocks_content_hash ON blocks(content_hash);
-CREATE INDEX idx_blocks_unused ON blocks(unused_turns) WHERE is_stub = 0;
+CREATE INDEX idx_blocks_session ON blocks(workspace_id, session_id);
+CREATE INDEX idx_blocks_hash    ON blocks(content_hash);
+CREATE INDEX idx_blocks_unused  ON blocks(unused_turns) WHERE is_stub = 0;
 ```
 
 **Block contents are NEVER persisted** — only metadata.
@@ -241,50 +277,60 @@ CREATE INDEX idx_blocks_unused ON blocks(unused_turns) WHERE is_stub = 0;
 
 ```sql
 CREATE TABLE turns (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  turn_number INTEGER NOT NULL,
-  cache_creation_5m_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_creation_1h_tokens INTEGER NOT NULL DEFAULT 0,
-  cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-  input_tokens INTEGER NOT NULL DEFAULT 0,
-  effective_cost_units REAL NOT NULL,  -- computed at write time
-  prefix_breakpoint_hash TEXT,
-  middle_breakpoint_hash TEXT,
-  pruned_blocks_count INTEGER NOT NULL DEFAULT 0,
+  id              TEXT PRIMARY KEY,
+  workspace_id    TEXT NOT NULL,
+  session_id      TEXT NOT NULL,
+  turn_number     INTEGER NOT NULL,
+  model           TEXT NOT NULL,
+  input_tokens    INTEGER NOT NULL DEFAULT 0,
+  output_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_creation_5m_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_creation_1h_tokens   INTEGER NOT NULL DEFAULT 0,
+  cache_read_tokens          INTEGER NOT NULL DEFAULT 0,
+  effective_cost_units       REAL NOT NULL,  -- computed at write time
+  prefix_breakpoint_hash     TEXT,
+  middle_breakpoint_hash     TEXT,
+  pruned_blocks_count        INTEGER NOT NULL DEFAULT 0,
   keepalive_pings_since_last_turn INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL,
-  UNIQUE (workspace_id, session_id, turn_number)
+  created_at      INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX idx_turns_session_num ON turns(workspace_id, session_id, turn_number);
 ```
+
+Column names (`cache_creation_5m_tokens`, `cache_creation_1h_tokens`) deliberately mirror the
+Anthropic API response fields (`ephemeral_5m_input_tokens`, `ephemeral_1h_input_tokens`,
+`cache_creation_input_tokens`) so the orchestrator does not need a translation layer.
 
 ### Entity: BlockReference (SQLite `block_references` table, append-only audit log)
 
 ```sql
 CREATE TABLE block_references (
-  id TEXT PRIMARY KEY,
-  block_id TEXT NOT NULL REFERENCES blocks(id),
-  turn_id TEXT NOT NULL REFERENCES turns(id),
-  reference_type TEXT NOT NULL  -- "tool_call" | "text_quote" | "id_mention"
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  block_id        TEXT NOT NULL REFERENCES blocks(id),
+  turn_id         TEXT NOT NULL REFERENCES turns(id),
+  reference_type  TEXT NOT NULL,    -- "tool_call" | "text_quote" | "id_mention"
+  evidence        TEXT NOT NULL,    -- short string showing what matched
+  created_at      INTEGER NOT NULL
 );
--- 90-day retention cap
+CREATE INDEX idx_refs_block ON block_references(block_id);
+CREATE INDEX idx_refs_turn  ON block_references(turn_id);
+-- 90-day retention cap (enforced at write time once retention job lands; M4+)
 ```
 
 ### Entity: CacheStateTracker (in-memory only)
 
 ```typescript
 interface PrefixState {
-  workspaceId: string;
-  prefixHash: string;
-  middleHash: string;
-  prefixTokenCount: number;
-  ttlClass: "5m" | "1h";
-  cachedAtMs: number;
-  lastReadAtMs: number;
-  expectedExpiryMs: number;
+  workspace_id: string;
+  prefix_hash: string;
+  middle_hash: string | null;
+  prefix_token_count: number;
+  ttl_class: "5m" | "1h";
+  cached_at_ms: number;
+  last_read_at_ms: number;
+  expected_expiry_ms: number;
 }
-// Map<workspaceId, PrefixState>
+// Map<workspace_id, PrefixState>
 // Resets on process restart; next turn pays one cache-write penalty
 ```
 
@@ -308,7 +354,7 @@ interface PrefixState {
 | AC-5 | Reference-detection precision ≥ 95% and recall ≥ 85% against the 100-session corpus, asserted in CI | REQ-NF-008, REQ-NF-009 |
 | AC-6 | The 100-session annotated corpus exists in-repo **before** any pruner code is written | §6.3 Step 1 |
 | AC-7 | Each major component PR includes a spec-to-code diff document mapping every named spec concept to its code symbol | §6.4 |
-| AC-8 | No PR exceeds 800 lines net new code (excluding generated fixtures and lockfiles) | REQ-NF-013 |
+| AC-8 | _removed_ — see REQ-NF-013 waiver. M1 scaffolding bundle grandfathered; no PR LOC cap enforced. | _n/a_ |
 | AC-9 | Every PR includes its own tests; no "tests in follow-up" merges | REQ-NF-014 |
 | AC-10 | Reviewer checklist applied to every PR: CI green; spec-to-code diff reviewed; no new non-deterministic ops/timestamps/Date.now/Math.random/Map iteration in hot paths; new deps audited; PR description explains "why" | §6.6 |
 | AC-11 | Keepalive experiment: 11 conditions × 5 scenarios × 30 sessions; report mean/median/95% CI of net effective cost; paired Wilcoxon signed-rank vs A1 baseline | §2.4.5 |

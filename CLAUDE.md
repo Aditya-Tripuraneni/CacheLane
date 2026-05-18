@@ -32,6 +32,15 @@ All implementation-ready specs live in `/designs/`. Read them in order before to
   are computed).
 - **Vocabulary**: `STABLE | SEMI | VOLATILE` — these are the only accepted names for volatility
   classes everywhere (spec, code, logs, tests, comments).
+- **Naming**: storage and API-contract types use `snake_case` (e.g. the `Block` interface,
+  `PrefixState`, `blocks/turns/block_references` rows, `CachelaneConfig` fields, SQLite columns).
+  In-process working types (function parameters, local helpers) may use `camelCase`. Rule of
+  thumb: if it crosses a process / storage / network boundary, snake_case.
+- **Source of truth on drift**: when in-repo synthesized specs in `/designs/` conflict with the
+  binding source docs (`Cachelane_Systems_Design_Document.docx`,
+  `Cachelane_Phase2_Engineering_Specifications_v2.docx`; pre-extracted text under
+  `/tmp/cachelane-extracts/`), the binding `.docx` wins. Fix the synthesis **upstream first**,
+  then the code — otherwise drift recurs on the next milestone.
 - **Fail-open**: any error in Cachelane must return the unmutated request to Claude Code. Never
   silently drop a turn or block the model.
 - **Local-only**: no prompt content, API keys, or user data leave `api.anthropic.com`'s direct
