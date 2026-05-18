@@ -1,0 +1,17 @@
+{
+  "input": {
+    "content": "DATABASE_URL=postgres://...",
+    "role": "tool",
+    "toolName": "Read",
+    "filePath": "/repo/.env",
+    "mtimeMs": 1700000000000,
+    "turnNumber": 1,
+    "currentTurn": 1
+  },
+  "config": {
+    "pin": [],
+    "exclude": ["**/.env*"],
+    "sliding_window_turns": 4
+  },
+  "expected": null
+}

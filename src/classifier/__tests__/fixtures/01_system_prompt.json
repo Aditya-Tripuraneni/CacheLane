@@ -1,0 +1,19 @@
+{
+  "input": {
+    "content": "You are Claude, a helpful AI assistant.",
+    "role": "system",
+    "turnNumber": 0,
+    "currentTurn": 0
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "system_prompt",
+    "volatility": "STABLE",
+    "is_pinned": false,
+    "signals": ["system_prompt"]
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "Hello, World!",
+    "role": "tool",
+    "toolName": "Bash",
+    "turnNumber": 1,
+    "currentTurn": 1
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "tool_output",
+    "volatility": "VOLATILE",
+    "is_pinned": false,
+    "signals": ["tool_output"]
+  }
+}

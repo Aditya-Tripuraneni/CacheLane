@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "[tool_use:Read][tool_result:file contents]",
+    "role": "tool",
+    "isToolUseResultPair": true,
+    "turnNumber": 3,
+    "currentTurn": 3
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "tool_use_result_pair",
+    "volatility": "VOLATILE",
+    "is_pinned": false,
+    "signals": ["tool_use_result_pair"]
+  }
+}

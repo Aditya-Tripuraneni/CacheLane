@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "# Project Context\n\nThis project is...",
+    "filePath": "/repo/CLAUDE.md",
+    "mtimeMs": 1700000000000,
+    "turnNumber": 0,
+    "currentTurn": 3
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "claude_md",
+    "volatility": "STABLE",
+    "is_pinned": false,
+    "signals": ["claude_md"]
+  }
+}

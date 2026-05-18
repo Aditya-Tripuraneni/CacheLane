@@ -1,0 +1,19 @@
+{
+  "input": {
+    "content": "Please refactor this function.",
+    "role": "user",
+    "turnNumber": 5,
+    "currentTurn": 5
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "user_message",
+    "volatility": "VOLATILE",
+    "is_pinned": false,
+    "signals": ["user_message"]
+  }
+}

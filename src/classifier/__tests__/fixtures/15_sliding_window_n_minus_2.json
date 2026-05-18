@@ -1,0 +1,19 @@
+{
+  "input": {
+    "content": "Earlier assistant response from two turns ago.",
+    "role": "assistant",
+    "turnNumber": 8,
+    "currentTurn": 10
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "prior_turn",
+    "volatility": "SEMI",
+    "is_pinned": false,
+    "signals": ["prior_turn"]
+  }
+}

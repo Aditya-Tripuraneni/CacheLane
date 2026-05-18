@@ -1,0 +1,21 @@
+{
+  "input": {
+    "content": "export function foo() { return 42; }",
+    "role": "tool",
+    "toolName": "Read",
+    "filePath": "/repo/src/foo.ts",
+    "turnNumber": 2,
+    "currentTurn": 2
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "tool_output",
+    "volatility": "VOLATILE",
+    "is_pinned": false,
+    "signals": ["tool_output"]
+  }
+}

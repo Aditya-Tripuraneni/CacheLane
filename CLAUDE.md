@@ -58,3 +58,20 @@ Original source materials at `/mnt/c/Users/jujum/Downloads/` (WSL path):
 - `Cachelane_Turns_and_Pruning_Explainer.html` — Algorithm intuition + worked examples
 
 Pre-extracted plain text at `/tmp/cachelane-extracts/` (regenerate with pandoc if lost).
+
+## Per-Milestone Implementation Workflow (lean)
+
+For each milestone (M2 → M9), follow this discipline:
+
+1. **Plan** — Read the binding spec sections for the milestone (in `/designs/`). Draft a plan file under `docs/superpowers/plans/YYYY-MM-DD-mN-<topic>.md` using the M1 plan as a template.
+2. **Branch** — `superpowers:using-git-worktrees` to create `feat/mN-<topic>` off `main`. Confirm Node 20 (`nvm use 20`) and a green baseline (`npm test`) before writing code.
+3. **TDD per task** — `superpowers:test-driven-development`. Write fixtures + red tests first. Watch them fail for the right reason. Implement minimum to green. No mocks unless crossing a process/network boundary.
+4. **Lean code** — One module per milestone unless the spec says otherwise. No new npm deps without an ADR. snake_case for storage/API-contract types; camelCase for in-process working types. Vocabulary: `STABLE | SEMI | VOLATILE` everywhere — no synonyms.
+5. **Subagent delegation** — `superpowers:subagent-driven-development` when tasks are independent (e.g., fixtures + glob helper + rules can run in parallel agents). Two-stage review (spec compliance, then code quality).
+6. **Verify before claiming done** — `superpowers:verification-before-completion`: run `npm test`, `npm run lint`, `npx tsc --noEmit` AND paste the output before saying "complete".
+7. **Debug systematically** — `superpowers:systematic-debugging` when a test fails unexpectedly. Root-cause; don't guess-and-patch.
+8. **Finish the branch** — `superpowers:finishing-a-development-branch` to merge / PR / clean up.
+
+**Test discipline (lean):** one assertion per test where possible; table-driven (`describe.each`) for enumerable cases (e.g., all 11 `BlockKind` values); fixtures as JSON so reviewers can audit without parsing test code. Keep test files focused — split when one file grows past ~300 lines.
+
+**Node version:** Storage tests require Node 20 (`better-sqlite3` native binding fails on Node 24). Pin CI to `actions/setup-node@v4` with `node-version: 20`.
