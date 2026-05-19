@@ -4,7 +4,7 @@ import type {
   BlockKind,
   Volatility,
   PrefixState,
-  TtlClass,
+  CacheTier,
   ReferenceType,
 } from "../index.js";
 
@@ -14,8 +14,8 @@ describe("types", () => {
     expect(values).toHaveLength(3);
   });
 
-  it("TtlClass union contains exactly 5m | 1h", () => {
-    const values: TtlClass[] = ["5m", "1h"];
+  it("CacheTier union contains exactly 5m | 1h", () => {
+    const values: CacheTier[] = ["5m", "1h"];
     expect(values).toHaveLength(2);
   });
 
@@ -63,7 +63,7 @@ describe("types", () => {
       workspace_id: "ws-abc",
       session_id: "sess-1",
       kind: "stub",
-      volatility: "VOLATILE",
+      volatility: "STABLE", // stubs inherit the replaced block's volatility (M2 passthrough)
       is_pinned: false,
       content_hash: "b".repeat(64),
       token_count: 50,

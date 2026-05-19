@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Block, BlockKind, Volatility } from "../types/index.js";
 
 const MIGRATION_DIR = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -13,9 +14,9 @@ export interface BlockRow {
   workspace_id: string;
   session_id: string;
   content_hash: string;
-  kind: string;
-  volatility: string;
-  is_pinned: number;
+  kind: BlockKind;
+  volatility: Volatility;
+  is_pinned: number; // SQLite stores booleans as 0/1; use rowToBlock() to convert
   token_count: number;
   added_at_turn: number;
   last_referenced_at_turn: number;
@@ -25,6 +26,14 @@ export interface BlockRow {
   refetch_handle: string | null;
   created_at: number;
   updated_at: number;
+}
+
+export function rowToBlock(row: BlockRow): Block {
+  return {
+    ...row,
+    is_pinned: row.is_pinned === 1,
+    is_stub: row.is_stub === 1,
+  };
 }
 
 export interface TurnRow {

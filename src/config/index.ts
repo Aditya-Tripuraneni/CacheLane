@@ -42,6 +42,7 @@ export function loadConfig(configPath: string): CachelaneConfig {
   try {
     raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
   } catch {
+    console.warn(`[cachelane] config at ${configPath} is malformed — falling back to defaults`);
     return { ...DEFAULT_CONFIG };
   }
 
