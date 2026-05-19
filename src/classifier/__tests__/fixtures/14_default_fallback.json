@@ -12,7 +12,7 @@
   "expected": {
     "kind": "user_message",
     "volatility": "VOLATILE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["fallback:default"]
   }
 }

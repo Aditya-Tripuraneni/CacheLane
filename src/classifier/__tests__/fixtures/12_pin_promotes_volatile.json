@@ -16,7 +16,7 @@
   "expected": {
     "kind": "file_read",
     "volatility": "STABLE",
-    "is_pinned": true,
+    "isPinned": true,
     "signals": ["file_read", "pin:match"]
   }
 }

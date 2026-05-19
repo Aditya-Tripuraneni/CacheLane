@@ -14,7 +14,7 @@
   "expected": {
     "kind": "claude_md",
     "volatility": "STABLE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["claude_md"]
   }
 }

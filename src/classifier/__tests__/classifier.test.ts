@@ -40,6 +40,7 @@ const FIXTURES = [
   "15_sliding_window_n_minus_2",
   "16_sliding_window_out",
   "17_file_read_missing_mtime_degrades",
+  "18_current_turn_assistant",
 ];
 
 describe.each(FIXTURES)("classifier fixture %s", (name) => {
@@ -133,7 +134,7 @@ describe("fail-open", () => {
     expect(result).toEqual({
       kind: "user_message",
       volatility: "VOLATILE",
-      is_pinned: false,
+      isPinned: false,
       signals: ["error:fallback"],
     });
   });
@@ -157,7 +158,7 @@ describe("fail-open", () => {
     const b = classifyBlock(input, badConfig);
     expect(a).not.toBe(b);
     expect(a?.signals).not.toBe(b?.signals);
-    a?.signals.push("mutated");
+    (a?.signals as string[] | undefined)?.push("mutated");
     expect(b?.signals).toEqual(["error:fallback"]);
   });
 });

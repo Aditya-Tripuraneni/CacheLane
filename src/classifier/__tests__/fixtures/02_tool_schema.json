@@ -13,7 +13,7 @@
   "expected": {
     "kind": "tool_schema",
     "volatility": "STABLE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["tool_schema"]
   }
 }

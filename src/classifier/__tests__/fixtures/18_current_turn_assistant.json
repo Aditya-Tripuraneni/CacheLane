@@ -1,8 +1,8 @@
 {
   "input": {
-    "content": "I'll help with that. Let me first read the file.",
+    "content": "Sure, here is the result...",
     "role": "assistant",
-    "turnNumber": 4,
+    "turnNumber": 5,
     "currentTurn": 5
   },
   "config": {
@@ -11,9 +11,9 @@
     "sliding_window_turns": 4
   },
   "expected": {
-    "kind": "prior_turn",
-    "volatility": "SEMI",
+    "kind": "user_message",
+    "volatility": "VOLATILE",
     "isPinned": false,
-    "signals": ["prior_turn"]
+    "signals": ["fallback:default"]
   }
 }

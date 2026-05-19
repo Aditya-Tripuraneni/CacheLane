@@ -14,7 +14,7 @@
   "expected": {
     "kind": "project_rules",
     "volatility": "STABLE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["project_rules"]
   }
 }

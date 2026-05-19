@@ -14,7 +14,7 @@
   "expected": {
     "kind": "stub",
     "volatility": "STABLE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["stub:passthrough"]
   }
 }

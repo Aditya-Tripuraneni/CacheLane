@@ -15,7 +15,7 @@
   "expected": {
     "kind": "tool_output",
     "volatility": "VOLATILE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["tool_output"]
   }
 }

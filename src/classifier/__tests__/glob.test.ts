@@ -38,12 +38,15 @@ describe("globMatch", () => {
     expect(globMatch("**/.env", "/repo/my.env")).toBe(false);
   });
 
-  it("escapes literal ? so it does not act as a regex quantifier", () => {
-    // Copilot review: an unescaped `?` makes the preceding char optional,
-    // so `file?.ts` would match `file.ts`. Glob `?` is not a supported
-    // wildcard in this matcher; `?` must be treated as a literal.
-    expect(globMatch("file?.ts", "file.ts")).toBe(false);
-    expect(globMatch("file?.ts", "fileX.ts")).toBe(false);
-    expect(globMatch("file?.ts", "file?.ts")).toBe(true);
+  it("? matches a single non-separator character (wildcard, not literal)", () => {
+    // Aditya review (CH-006): `?` should be the bash/minimatch
+    // single-char wildcard so user-supplied pins like `src/foo?.ts`
+    // match `foo1.ts`, `foo2.ts`. Crucially `?` is NOT a regex
+    // quantifier here — it consumes one non-separator char.
+    expect(globMatch("file?.ts", "file.ts")).toBe(false);   // no char to match
+    expect(globMatch("file?.ts", "fileX.ts")).toBe(true);   // X matches ?
+    expect(globMatch("file?.ts", "file?.ts")).toBe(true);   // literal ? also matches
+    expect(globMatch("file?.ts", "fileXY.ts")).toBe(false); // too many chars
+    expect(globMatch("file?.ts", "file/X.ts")).toBe(false); // ? does not cross /
   });
 });

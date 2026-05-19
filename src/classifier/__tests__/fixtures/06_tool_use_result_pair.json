@@ -14,7 +14,7 @@
   "expected": {
     "kind": "tool_use_result_pair",
     "volatility": "VOLATILE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["tool_use_result_pair"]
   }
 }

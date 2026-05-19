@@ -14,7 +14,7 @@
   "expected": {
     "kind": "retrieval_result",
     "volatility": "VOLATILE",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["retrieval_result"]
   }
 }

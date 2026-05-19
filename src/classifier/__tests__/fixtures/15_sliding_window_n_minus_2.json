@@ -13,7 +13,7 @@
   "expected": {
     "kind": "prior_turn",
     "volatility": "SEMI",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["prior_turn"]
   }
 }

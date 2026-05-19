@@ -16,7 +16,7 @@
   "expected": {
     "kind": "file_read",
     "volatility": "SEMI",
-    "is_pinned": false,
+    "isPinned": false,
     "signals": ["file_read"]
   }
 }
