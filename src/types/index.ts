@@ -1,6 +1,6 @@
 export type Volatility = "STABLE" | "SEMI" | "VOLATILE";
 
-export type TtlClass = "5m" | "1h";
+export type CacheTier = "5m" | "1h";
 
 export type BlockKind =
   | "system_prompt"
@@ -41,7 +41,7 @@ export interface PrefixState {
   prefix_hash: string;
   middle_hash: string | null;
   prefix_token_count: number;
-  ttl_class: TtlClass;
+  ttl_class: CacheTier;
   cached_at_ms: number;
   last_read_at_ms: number;
   expected_expiry_ms: number;
