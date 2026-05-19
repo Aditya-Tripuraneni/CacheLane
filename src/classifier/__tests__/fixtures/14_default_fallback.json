@@ -1,0 +1,18 @@
+{
+  "input": {
+    "content": "Unknown shape with no rule match.",
+    "turnNumber": 3,
+    "currentTurn": 5
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "user_message",
+    "volatility": "VOLATILE",
+    "isPinned": false,
+    "signals": ["fallback:default"]
+  }
+}

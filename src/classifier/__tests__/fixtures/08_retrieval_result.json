@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "src/foo.ts:12: foo()\nsrc/bar.ts:34: foo()",
+    "role": "tool",
+    "toolName": "Grep",
+    "turnNumber": 2,
+    "currentTurn": 2
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "retrieval_result",
+    "volatility": "VOLATILE",
+    "isPinned": false,
+    "signals": ["retrieval_result"]
+  }
+}

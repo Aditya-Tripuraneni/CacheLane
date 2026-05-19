@@ -1,0 +1,22 @@
+{
+  "input": {
+    "content": "export function foo() { return 42; }",
+    "role": "tool",
+    "toolName": "Read",
+    "filePath": "/repo/src/foo.ts",
+    "mtimeMs": 1700001234567,
+    "turnNumber": 2,
+    "currentTurn": 2
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "file_read",
+    "volatility": "SEMI",
+    "isPinned": false,
+    "signals": ["file_read"]
+  }
+}

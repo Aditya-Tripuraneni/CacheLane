@@ -1,0 +1,22 @@
+{
+  "input": {
+    "content": "API_KEY=sk-...",
+    "role": "tool",
+    "toolName": "Read",
+    "filePath": "/repo/SECRETS.md",
+    "mtimeMs": 1700000000000,
+    "turnNumber": 1,
+    "currentTurn": 1
+  },
+  "config": {
+    "pin": ["**/SECRETS.md"],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "file_read",
+    "volatility": "STABLE",
+    "isPinned": true,
+    "signals": ["file_read", "pin:match"]
+  }
+}

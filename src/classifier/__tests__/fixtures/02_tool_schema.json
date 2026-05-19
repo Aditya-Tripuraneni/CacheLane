@@ -1,0 +1,19 @@
+{
+  "input": {
+    "content": "{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}",
+    "kindHint": "tool_schema",
+    "turnNumber": 0,
+    "currentTurn": 0
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "tool_schema",
+    "volatility": "STABLE",
+    "isPinned": false,
+    "signals": ["tool_schema"]
+  }
+}

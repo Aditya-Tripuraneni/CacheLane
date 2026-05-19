@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "[stub:01HXXX summary of prior tool result]",
+    "kindHint": "stub",
+    "incomingVolatility": "STABLE",
+    "turnNumber": 2,
+    "currentTurn": 5
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "stub",
+    "volatility": "STABLE",
+    "isPinned": false,
+    "signals": ["stub:passthrough"]
+  }
+}

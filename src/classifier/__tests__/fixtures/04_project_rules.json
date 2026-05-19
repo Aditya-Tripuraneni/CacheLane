@@ -1,0 +1,20 @@
+{
+  "input": {
+    "content": "## Rules\n- Always use TypeScript strict mode.",
+    "filePath": "/repo/.cursorrules",
+    "mtimeMs": 1700000000000,
+    "turnNumber": 0,
+    "currentTurn": 2
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 4
+  },
+  "expected": {
+    "kind": "project_rules",
+    "volatility": "STABLE",
+    "isPinned": false,
+    "signals": ["project_rules"]
+  }
+}

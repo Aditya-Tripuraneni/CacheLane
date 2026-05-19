@@ -1,0 +1,19 @@
+{
+  "input": {
+    "content": "Assistant text from outside the sliding window.",
+    "role": "assistant",
+    "turnNumber": 7,
+    "currentTurn": 10
+  },
+  "config": {
+    "pin": [],
+    "exclude": [],
+    "sliding_window_turns": 3
+  },
+  "expected": {
+    "kind": "user_message",
+    "volatility": "VOLATILE",
+    "isPinned": false,
+    "signals": ["fallback:default"]
+  }
+}
