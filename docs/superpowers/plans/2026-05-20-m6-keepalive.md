@@ -35,3 +35,12 @@ dependencies.
 - The default config has a long `interval_seconds` relative to a 5-minute TTL.
   M6 honors config as requested; future empirical tuning can revise defaults
   without changing worker semantics.
+
+## Review Follow-ups
+
+- Prefix token counting is fully fail-open: serialization failures now degrade
+  to `prefix_token_count: 0` without disabling cache marker placement.
+- Keepalive interval ticks log unexpected rejections and unref the timer so the
+  library does not keep otherwise-idle Node processes alive.
+- Successful ping completion re-reads tracker state before expiry updates, so an
+  in-flight ping cannot overwrite a newer orchestrator state for the session.

@@ -127,9 +127,13 @@ export class KeepaliveWorker {
   start(): void {
     if (this.timer !== null || this.config.policy === "off") return;
     this.timer = setInterval(
-      () => void this.tick(),
+      () =>
+        void this.tick().catch((err: unknown) => {
+          this.logger.error("[cachelane] keepalive tick failed", err);
+        }),
       this.config.interval_seconds * 1000,
     );
+    this.timer.unref?.();
   }
 
   stop(): void {
@@ -160,11 +164,21 @@ export class KeepaliveWorker {
       try {
         const ping = await this.executor(decision.request);
         if (ping.ok) {
-          this.tracker.update(entry.workspace_id, entry.session_id, {
-            ...entry.state,
-            last_read_at_ms: nowMs,
-            expected_expiry_ms: nextExpiry(nowMs, entry.state.ttl_class),
-          });
+          const latestState = this.tracker.get(
+            entry.workspace_id,
+            entry.session_id,
+          );
+          if (
+            latestState?.prefix_hash === decision.request.prefix_hash &&
+            latestState.middle_hash === decision.request.middle_hash &&
+            latestState.ttl_class === decision.request.ttl_class
+          ) {
+            this.tracker.update(entry.workspace_id, entry.session_id, {
+              ...latestState,
+              last_read_at_ms: nowMs,
+              expected_expiry_ms: nextExpiry(nowMs, latestState.ttl_class),
+            });
+          }
           result.pinged += 1;
         } else {
           result.failed += 1;

@@ -132,6 +132,35 @@ describe("orchestrate (integration)", () => {
     );
   });
 
+  it("keeps orchestration active when prefix token serialization fails", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const circularSchema: Record<string, unknown> = { type: "object" };
+    circularSchema.self = circularSchema;
+    const request: AnthropicMessagesRequest = {
+      ...baseRequest,
+      tools: [{ name: "Circular", input_schema: circularSchema }],
+    };
+    const input: OrchestratorInput = {
+      workspace_id: "ws-circular-prefix",
+      session_id: "s-1",
+      current_turn: 1,
+      message_classifications: [cl("VOLATILE")],
+      original_request: request,
+    };
+    const tracker = new CacheStateTracker();
+
+    const out = orchestrate(input, tracker);
+
+    expect(out.mutated).toBe(true);
+    expect(out.signals).toContain("prefix_cached");
+    expect(tracker.get("ws-circular-prefix", "s-1")?.prefix_token_count).toBe(0);
+    expect(warn).toHaveBeenCalledWith(
+      "[cachelane] prefix token count unavailable",
+      expect.any(TypeError),
+    );
+    warn.mockRestore();
+  });
+
   it("middle marker absent on turn 1, present on turn 2 with identical SEMI messages", () => {
     // Turn 1: no prev state — middle breakpoint must NOT fire.
     // Placing a middle marker on turn 1 would tell Anthropic to look for a

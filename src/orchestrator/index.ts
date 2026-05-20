@@ -29,11 +29,11 @@ const TTL_MS: Record<CacheTier, number> = {
 };
 
 function prefixTokenCount(input: OrchestratorInput): number {
-  const prefixText = JSON.stringify({
-    system: input.original_request.system ?? [],
-    tools: input.original_request.tools ?? [],
-  });
   try {
+    const prefixText = JSON.stringify({
+      system: input.original_request.system ?? [],
+      tools: input.original_request.tools ?? [],
+    });
     return countTokens(prefixText, input.original_request.model);
   } catch (err) {
     console.warn("[cachelane] prefix token count unavailable", err);

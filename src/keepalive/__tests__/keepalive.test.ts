@@ -170,4 +170,75 @@ describe("KeepaliveWorker", () => {
     finish({ ok: true });
     await firstTick;
   });
+
+  it("does not clobber newer cache state after an in-flight ping resolves", async () => {
+    const tracker = new CacheStateTracker();
+    tracker.update("ws-1", "s-1", state());
+    let finish!: (value: KeepalivePingResult) => void;
+    const executor = vi.fn(
+      () =>
+        new Promise<KeepalivePingResult>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const worker = new KeepaliveWorker({ tracker, config, executor });
+
+    const firstTick = worker.tick(260_000);
+    tracker.update(
+      "ws-1",
+      "s-1",
+      state({
+        prefix_hash: "new-prefix",
+        middle_hash: "new-middle",
+        ttl_class: "1h",
+        last_read_at_ms: 275_000,
+        expected_expiry_ms: 3_875_000,
+      }),
+    );
+    finish({ ok: true });
+
+    const result = await firstTick;
+
+    expect(result).toEqual({ pinged: 1, skipped: 0, failed: 0 });
+    expect(tracker.get("ws-1", "s-1")).toMatchObject({
+      prefix_hash: "new-prefix",
+      middle_hash: "new-middle",
+      ttl_class: "1h",
+      last_read_at_ms: 275_000,
+      expected_expiry_ms: 3_875_000,
+    });
+  });
+
+  it("logs unexpected interval tick failures", async () => {
+    vi.useFakeTimers();
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+    };
+    const tracker = {
+      entries: () => {
+        throw new Error("tracker failed");
+      },
+    } as unknown as CacheStateTracker;
+    const worker = new KeepaliveWorker({
+      tracker,
+      config: { ...config, interval_seconds: 1 },
+      executor: () => ({ ok: true }),
+      logger,
+    });
+
+    try {
+      worker.start();
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(logger.error).toHaveBeenCalledWith(
+        "[cachelane] keepalive tick failed",
+        expect.any(Error),
+      );
+    } finally {
+      worker.stop();
+      vi.useRealTimers();
+    }
+  });
 });
