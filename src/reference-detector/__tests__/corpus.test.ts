@@ -23,11 +23,49 @@ type CorpusEntry = {
   };
 };
 
+type CorpusMetrics = {
+  truePositives: number;
+  falsePositives: number;
+  falseNegatives: number;
+};
+
 function loadCorpus(): CorpusEntry[] {
   const files = readdirSync(CORPUS_DIR).filter((f) => f.endsWith(".json"));
   return files.map((f) =>
     JSON.parse(readFileSync(resolve(CORPUS_DIR, f), "utf-8")) as CorpusEntry,
   );
+}
+
+function scoreCorpus(entries: CorpusEntry[]): CorpusMetrics {
+  let truePositives = 0;
+  let falsePositives = 0;
+  let falseNegatives = 0;
+
+  for (const entry of entries) {
+    const result = detectReferences(entry.detection_blocks, entry.assistant_message);
+    const trueRefIds = new Set(entry.ground_truth.referenced_block_ids);
+
+    for (const detectedId of result.referenced_ids) {
+      if (trueRefIds.has(detectedId)) {
+        truePositives++;
+      } else {
+        falsePositives++;
+      }
+    }
+
+    for (const trueId of trueRefIds) {
+      if (!result.referenced_ids.has(trueId)) {
+        falseNegatives++;
+      }
+    }
+  }
+
+  return { truePositives, falsePositives, falseNegatives };
+}
+
+function isSyntheticBaseline(entry: CorpusEntry): boolean {
+  const n = Number(entry.id.replace("corpus-", ""));
+  return Number.isInteger(n) && n >= 1 && n <= 20;
 }
 
 describe("corpus gate — REQ-NF-008, REQ-NF-009 (CI-blocking, AC-5, AC-6)", () => {
@@ -41,21 +79,7 @@ describe("corpus gate — REQ-NF-008, REQ-NF-009 (CI-blocking, AC-5, AC-6)", () 
 
   it(`precision >= ${PRECISION_THRESHOLD * 100}% across all corpus entries`, () => {
     const entries = loadCorpus();
-    let truePositives = 0;
-    let falsePositives = 0;
-
-    for (const entry of entries) {
-      const result = detectReferences(entry.detection_blocks, entry.assistant_message);
-      const trueRefIds = new Set(entry.ground_truth.referenced_block_ids);
-
-      for (const detectedId of result.referenced_ids) {
-        if (trueRefIds.has(detectedId)) {
-          truePositives++;
-        } else {
-          falsePositives++;
-        }
-      }
-    }
+    const { truePositives, falsePositives } = scoreCorpus(entries);
 
     const precision =
       truePositives + falsePositives === 0
@@ -68,21 +92,7 @@ describe("corpus gate — REQ-NF-008, REQ-NF-009 (CI-blocking, AC-5, AC-6)", () 
 
   it(`recall >= ${RECALL_THRESHOLD * 100}% across all corpus entries`, () => {
     const entries = loadCorpus();
-    let truePositives = 0;
-    let falseNegatives = 0;
-
-    for (const entry of entries) {
-      const result = detectReferences(entry.detection_blocks, entry.assistant_message);
-      const trueRefIds = new Set(entry.ground_truth.referenced_block_ids);
-
-      for (const trueId of trueRefIds) {
-        if (result.referenced_ids.has(trueId)) {
-          truePositives++;
-        } else {
-          falseNegatives++;
-        }
-      }
-    }
+    const { truePositives, falseNegatives } = scoreCorpus(entries);
 
     const recall =
       truePositives + falseNegatives === 0
@@ -91,6 +101,15 @@ describe("corpus gate — REQ-NF-008, REQ-NF-009 (CI-blocking, AC-5, AC-6)", () 
 
     const recallMsg = `Recall ${(recall * 100).toFixed(1)}% below required ${RECALL_THRESHOLD * 100}% (REQ-NF-009). truePositives=${truePositives}, falseNegatives=${falseNegatives}`;
     expect(recall, recallMsg).toBeGreaterThanOrEqual(RECALL_THRESHOLD);
+  });
+
+  it("committed synthetic baseline has no false positives or false negatives", () => {
+    const entries = loadCorpus().filter(isSyntheticBaseline);
+    const metrics = scoreCorpus(entries);
+
+    expect(entries).toHaveLength(20);
+    expect(metrics.falsePositives).toBe(0);
+    expect(metrics.falseNegatives).toBe(0);
   });
 
   it("prints per-entry breakdown for diagnostic visibility", () => {

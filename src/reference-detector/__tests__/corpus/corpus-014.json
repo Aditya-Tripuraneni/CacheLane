@@ -11,7 +11,7 @@
   "assistant_message": {
     "role": "assistant",
     "content": [
-      { "type": "text", "text": "The log shows: build completed successfully at 09:42 — all good." }
+      { "type": "text", "text": "The log ends with: 00\nbuild completed successfully at 09:42 — all good." }
     ]
   },
   "ground_truth": {
