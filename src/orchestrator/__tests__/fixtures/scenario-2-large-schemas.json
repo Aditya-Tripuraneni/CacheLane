@@ -1,0 +1,192 @@
+{
+  "input": {
+    "workspace_id": "ws-large-schemas",
+    "session_id": "s-1",
+    "current_turn": 1,
+    "original_request": {
+      "model": "claude-opus-4-7",
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude, a senior software engineer with deep knowledge across many languages and frameworks. Follow the user's coding conventions and prefer clarity over cleverness."
+        },
+        {
+          "type": "text",
+          "text": "Project context: a TypeScript MCP server with strict module layering. Tests run on vitest. Do not introduce new npm deps without an ADR."
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "description": "Read a file from disk",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "offset": {
+                "type": "number"
+              },
+              "limit": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "path"
+            ]
+          }
+        },
+        {
+          "name": "Write",
+          "description": "Write a file to disk",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "content"
+            ]
+          }
+        },
+        {
+          "name": "Edit",
+          "description": "Edit a file in place",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "old_string": {
+                "type": "string"
+              },
+              "new_string": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path",
+              "old_string",
+              "new_string"
+            ]
+          }
+        },
+        {
+          "name": "Bash",
+          "description": "Run a shell command",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "command": {
+                "type": "string"
+              },
+              "timeout": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "command"
+            ]
+          }
+        },
+        {
+          "name": "Grep",
+          "description": "Search file contents",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pattern"
+            ]
+          }
+        },
+        {
+          "name": "Glob",
+          "description": "Match file paths",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "pattern": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "pattern"
+            ]
+          }
+        },
+        {
+          "name": "WebFetch",
+          "description": "Fetch a URL",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "url"
+            ]
+          }
+        },
+        {
+          "name": "WebSearch",
+          "description": "Search the web",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "query": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "query"
+            ]
+          }
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Refactor the auth module."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 4096
+    },
+    "message_classifications": [
+      {
+        "kind": "user_message",
+        "volatility": "VOLATILE",
+        "isPinned": false,
+        "signals": [
+          "user_message"
+        ]
+      }
+    ]
+  },
+  "prev_state": null,
+  "config": {
+    "sliding_window_turns": 4
+  }
+}

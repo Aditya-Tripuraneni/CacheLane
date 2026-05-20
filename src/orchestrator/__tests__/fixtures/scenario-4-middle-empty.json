@@ -1,0 +1,50 @@
+{
+  "input": {
+    "workspace_id": "ws-middle-empty",
+    "session_id": "s-1",
+    "current_turn": 1,
+    "original_request": {
+      "model": "claude-opus-4-7",
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude."
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "input_schema": {
+            "type": "object"
+          }
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "First request, no prior turns."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 2048
+    },
+    "message_classifications": [
+      {
+        "kind": "user_message",
+        "volatility": "VOLATILE",
+        "isPinned": false,
+        "signals": [
+          "user_message"
+        ]
+      }
+    ]
+  },
+  "prev_state": null,
+  "config": {
+    "sliding_window_turns": 4
+  }
+}
