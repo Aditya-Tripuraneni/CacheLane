@@ -17,15 +17,26 @@ export type AnthropicToolUseContent = {
   cache_control?: AnthropicCacheControl;
 };
 
+export type AnthropicImageSource =
+  | { type: "base64"; media_type: "image/jpeg" | "image/png" | "image/gif" | "image/webp"; data: string }
+  | { type: "url"; url: string };
+
+export type AnthropicImageContent = {
+  type: "image";
+  source: AnthropicImageSource;
+  cache_control?: AnthropicCacheControl;
+};
+
 export type AnthropicToolResultContent = {
   type: "tool_result";
   tool_use_id: string;
-  content: string;
+  content: string | (AnthropicTextContent | AnthropicImageContent)[];
   cache_control?: AnthropicCacheControl;
 };
 
 export type AnthropicMessageContent =
   | AnthropicTextContent
+  | AnthropicImageContent
   | AnthropicToolUseContent
   | AnthropicToolResultContent;
 

@@ -1,0 +1,93 @@
+{
+  "input": {
+    "workspace_id": "ws-middle-promoted",
+    "session_id": "s-1",
+    "current_turn": 3,
+    "original_request": {
+      "model": "claude-opus-4-7",
+      "system": [
+        {
+          "type": "text",
+          "text": "You are Claude."
+        }
+      ],
+      "tools": [
+        {
+          "name": "Read",
+          "input_schema": {
+            "type": "object"
+          }
+        }
+      ],
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Look at foo.ts"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "Reading foo.ts"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Now refactor."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 2048
+    },
+    "message_classifications": [
+      {
+        "kind": "user_message",
+        "volatility": "SEMI",
+        "isPinned": false,
+        "signals": [
+          "user_message"
+        ]
+      },
+      {
+        "kind": "user_message",
+        "volatility": "SEMI",
+        "isPinned": false,
+        "signals": [
+          "user_message"
+        ]
+      },
+      {
+        "kind": "user_message",
+        "volatility": "VOLATILE",
+        "isPinned": false,
+        "signals": [
+          "user_message"
+        ]
+      }
+    ]
+  },
+  "prev_state": {
+    "workspace_id": "ws-middle-promoted",
+    "prefix_hash": "5ddd97cb91477aca5de9effa30339a382807a1d4829ec01e0377e1803c483257",
+    "middle_hash": "2fc8a19895ad05c55618740b5e2d3fbfa9eecad014b6d7893b96d68f4f013d6c",
+    "prefix_token_count": 0,
+    "ttl_class": "5m",
+    "cached_at_ms": 0,
+    "last_read_at_ms": 0,
+    "expected_expiry_ms": 0
+  },
+  "config": {
+    "sliding_window_turns": 4
+  }
+}

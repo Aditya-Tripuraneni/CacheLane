@@ -6,11 +6,13 @@ import type {
   RegionBoundaries,
 } from "./types.js";
 
-function canonicalize(value: unknown): string {
+function canonicalize(value: unknown, seen = new Set<unknown>()): string {
   if (value === undefined || value === null) return "null";
   if (typeof value !== "object") return JSON.stringify(value);
+  if (seen.has(value)) return '"[Circular]"';
+  seen.add(value);
   if (Array.isArray(value)) {
-    return "[" + value.map(canonicalize).join(",") + "]";
+    return "[" + value.map((v) => canonicalize(v, seen)).join(",") + "]";
   }
   const obj = value as Record<string, unknown>;
   const keys = Object.keys(obj)
@@ -19,7 +21,7 @@ function canonicalize(value: unknown): string {
   return (
     "{" +
     keys
-      .map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k]))
+      .map((k) => JSON.stringify(k) + ":" + canonicalize(obj[k], seen))
       .join(",") +
     "}"
   );

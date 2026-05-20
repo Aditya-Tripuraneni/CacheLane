@@ -48,6 +48,7 @@ describe("orchestrate (integration)", () => {
       ttl: "5m",
     });
     expect(out.prefix_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(out.signals).toContain("prefix_cached");
   });
 
   it("fail-open: bad input returns the original unmutated request with error signal", () => {
@@ -69,6 +70,24 @@ describe("orchestrate (integration)", () => {
     spy.mockRestore();
   });
 
+  it("mutated=false when request has no system blocks and no tools", () => {
+    const requestNoPrefix: AnthropicMessagesRequest = {
+      model: "claude-opus-4-7",
+      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+      max_tokens: 1024,
+    };
+    const input: OrchestratorInput = {
+      workspace_id: "ws-1",
+      session_id: "s-1",
+      current_turn: 1,
+      message_classifications: [cl("VOLATILE")],
+      original_request: requestNoPrefix,
+    };
+    const tracker = new CacheStateTracker();
+    const out = orchestrate(input, tracker);
+    expect(out.mutated).toBe(false);
+  });
+
   it("updates the tracker on a successful turn", () => {
     const input: OrchestratorInput = {
       workspace_id: "ws-1",
@@ -79,8 +98,79 @@ describe("orchestrate (integration)", () => {
     };
     const tracker = new CacheStateTracker();
     const out = orchestrate(input, tracker);
-    const state = tracker.get("ws-1");
+    const state = tracker.get("ws-1", "s-1");
     expect(state?.prefix_hash).toBe(out.prefix_hash);
     expect(state?.middle_hash).toBe(out.middle_hash);
+  });
+
+  it("middle marker absent on turn 1, present on turn 2 with identical SEMI messages", () => {
+    // Turn 1: no prev state — middle breakpoint must NOT fire.
+    // Placing a middle marker on turn 1 would tell Anthropic to look for a
+    // cache entry that does not exist yet, so the user pays full price.
+    const input: OrchestratorInput = {
+      workspace_id: "ws-two-turn",
+      session_id: "s-1",
+      current_turn: 1,
+      message_classifications: [cl("SEMI"), cl("SEMI"), cl("VOLATILE")],
+      original_request: baseRequest,
+    };
+    const tracker = new CacheStateTracker();
+
+    const turn1 = orchestrate(input, tracker);
+    expect(turn1.request.messages[1]?.content.at(-1)?.cache_control).toBeUndefined();
+    expect(turn1.signals).not.toContain("middle_cached");
+
+    // Turn 2: same request, same middle — middle breakpoint MUST fire now.
+    const turn2 = orchestrate({ ...input, current_turn: 2 }, tracker);
+    expect(turn2.request.messages[1]?.content.at(-1)?.cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
+    });
+    expect(turn2.signals).toContain("middle_cached");
+  });
+
+  it("middle marker absent on turn 2 when SEMI content changes between turns", () => {
+    // If the middle region changes, the cached prefix no longer matches —
+    // promoting the middle breakpoint would point to a boundary Anthropic
+    // won't honour, charging the user full price.
+    const tracker = new CacheStateTracker();
+
+    const turn1Input: OrchestratorInput = {
+      workspace_id: "ws-changed-middle",
+      session_id: "s-1",
+      current_turn: 1,
+      message_classifications: [cl("SEMI"), cl("SEMI"), cl("VOLATILE")],
+      original_request: baseRequest,
+    };
+    orchestrate(turn1Input, tracker);
+
+    const differentMiddleRequest: AnthropicMessagesRequest = {
+      ...baseRequest,
+      messages: [
+        { role: "user",      content: [{ type: "text", text: "different" }] },
+        { role: "assistant", content: [{ type: "text", text: "response"  }] },
+        { role: "user",      content: [{ type: "text", text: "new"       }] },
+      ],
+    };
+    const turn2 = orchestrate(
+      { ...turn1Input, current_turn: 2, original_request: differentMiddleRequest },
+      tracker,
+    );
+    expect(turn2.request.messages[1]?.content.at(-1)?.cache_control).toBeUndefined();
+  });
+
+  it("does not mutate the original request object", () => {
+    // If the original is silently modified, the fail-open path would return
+    // a request that already has stale cache markers on it.
+    const input: OrchestratorInput = {
+      workspace_id: "ws-immutable",
+      session_id: "s-1",
+      current_turn: 1,
+      message_classifications: [cl("SEMI"), cl("SEMI"), cl("VOLATILE")],
+      original_request: baseRequest,
+    };
+    const originalJson = JSON.stringify(baseRequest);
+    orchestrate(input, new CacheStateTracker());
+    expect(JSON.stringify(baseRequest)).toBe(originalJson);
   });
 });

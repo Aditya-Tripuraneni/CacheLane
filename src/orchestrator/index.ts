@@ -1,6 +1,6 @@
 import type { MutatedRequest, OrchestratorInput } from "./types.js";
 import { CacheStateTracker } from "./cache-state-tracker.js";
-import { reorder } from "./reorderer.js";
+import { findRegionBoundaries } from "./region-boundaries.js";
 import { placeBreakpoints } from "./breakpoint-placer.js";
 import { mutateRequest } from "./request-mutator.js";
 
@@ -27,8 +27,8 @@ export function orchestrate(
   tracker: CacheStateTracker,
 ): MutatedRequest {
   try {
-    const boundaries = reorder(input.message_classifications);
-    const prevState = tracker.get(input.workspace_id);
+    const boundaries = findRegionBoundaries(input.message_classifications);
+    const prevState = tracker.get(input.workspace_id, input.session_id);
     const breakpoints = placeBreakpoints(
       input.original_request,
       boundaries,
@@ -41,29 +41,32 @@ export function orchestrate(
     );
 
     const now = Date.now();
-    tracker.update(input.workspace_id, {
+    tracker.update(input.workspace_id, input.session_id, {
       workspace_id: input.workspace_id,
       prefix_hash: breakpoints.prefix_hash,
       middle_hash: breakpoints.middle_hash,
-      prefix_token_count: 0,
-      ttl_class: "5m",
+      prefix_token_count: 0, // TODO(M6): replace with real token count
+      ttl_class: "5m", // TODO(M6): derive from token count + config
       cached_at_ms: now,
       last_read_at_ms: now,
       expected_expiry_ms: now + FIVE_MINUTES_MS,
     });
 
+    const didMutate =
+      mutated.tools?.at(-1)?.cache_control !== undefined ||
+      mutated.system?.at(-1)?.cache_control !== undefined;
+
     return {
       request: mutated,
-      mutated: true,
+      mutated: didMutate,
       prefix_hash: breakpoints.prefix_hash,
       middle_hash: breakpoints.middle_hash,
-      signals: ["ok"],
+      signals: breakpoints.include_middle_breakpoint
+        ? ["prefix_cached", "middle_cached"]
+        : ["prefix_cached"],
     };
   } catch (err) {
-    // orchestrate must never throw; log and fail-open with the unmutated
-    // request. M7 will swap console.error for the structured logger so ops
-    // can alert on `error:fallback` signal rate. Mirrors the classifier
-    // pattern landed in M2 (commit 546b32a).
+    // Fail-open: never let an orchestration error block the model call.
     console.error("[cachelane] orchestrate error", err);
     return {
       request: input.original_request,

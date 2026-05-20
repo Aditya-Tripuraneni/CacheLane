@@ -3,15 +3,19 @@ import type { PrefixState } from "../types/index.js";
 export class CacheStateTracker {
   private readonly states: Map<string, PrefixState> = new Map();
 
-  get(workspace_id: string): PrefixState | undefined {
-    return this.states.get(workspace_id);
+  private key(workspace_id: string, session_id: string): string {
+    return `${workspace_id}:${session_id}`;
   }
 
-  update(workspace_id: string, state: PrefixState): void {
-    this.states.set(workspace_id, state);
+  get(workspace_id: string, session_id: string): PrefixState | undefined {
+    return this.states.get(this.key(workspace_id, session_id));
   }
 
-  reset(workspace_id: string): void {
-    this.states.delete(workspace_id);
+  update(workspace_id: string, session_id: string, state: PrefixState): void {
+    this.states.set(this.key(workspace_id, session_id), state);
+  }
+
+  reset(workspace_id: string, session_id: string): void {
+    this.states.delete(this.key(workspace_id, session_id));
   }
 }
