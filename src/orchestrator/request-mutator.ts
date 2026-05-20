@@ -5,8 +5,8 @@ import type {
   RegionBoundaries,
 } from "./types.js";
 
-const PREFIX_MARKER: AnthropicCacheControl = { type: "ephemeral", ttl: "5m" };
-const MIDDLE_MARKER: AnthropicCacheControl = { type: "ephemeral", ttl: "5m" };
+const PREFIX_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
+const MIDDLE_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
 
 export function mutateRequest(
   originalRequest: AnthropicMessagesRequest,

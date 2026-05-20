@@ -62,6 +62,29 @@ describe("mutateRequest", () => {
     expect(lastContent?.cache_control).toBeUndefined();
   });
 
+  it("falls back to last system block for prefix marker when no tools present", () => {
+    const systemOnlyRequest: AnthropicMessagesRequest = {
+      ...baseRequest,
+      tools: undefined,
+    };
+    const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+    const out = mutateRequest(systemOnlyRequest, boundaries, {
+      ...breakpoints,
+      include_middle_breakpoint: false,
+    });
+    expect(out.system?.at(-1)?.cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
+    });
+  });
+
+  it("does not mutate the original request object", () => {
+    const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
+    const originalJson = JSON.stringify(baseRequest);
+    mutateRequest(baseRequest, boundaries, breakpoints);
+    expect(JSON.stringify(baseRequest)).toBe(originalJson);
+  });
+
   it("preserves model, max_tokens, and original message ordering", () => {
     const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
     const out = mutateRequest(baseRequest, boundaries, breakpoints);
