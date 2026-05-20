@@ -24,6 +24,7 @@ export interface BlockRow {
   is_stub: number;
   stub_summary: string | null;
   refetch_handle: string | null;
+  restored_at_turn: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -73,6 +74,7 @@ export interface InsertBlockParams {
   is_stub: boolean;
   stub_summary: string | null;
   refetch_handle: string | null;
+  restored_at_turn?: number | null;
   created_at: number;
   updated_at: number;
 }
@@ -114,9 +116,31 @@ export interface InsertBlockReferenceParams {
   created_at: number;
 }
 
+export interface GetPrunableBlocksParams {
+  workspace_id: string;
+  session_id: string;
+  k: number;
+}
+
+export interface GetBlocksByIdPrefixParams {
+  workspace_id: string;
+  session_id: string;
+  block_id_prefix: string;
+}
+
+export interface RestoreStubParams {
+  workspace_id: string;
+  session_id: string;
+  block_id: string;
+  turn_number: number;
+  updated_at: number;
+}
+
 export interface CachelaneDb extends Database.Database {
   insertBlock(params: InsertBlockParams): void;
   getBlock(id: string): BlockRow | null;
+  getPrunableBlocks(params: GetPrunableBlocksParams): BlockRow[];
+  getBlocksByIdPrefix(params: GetBlocksByIdPrefixParams): BlockRow[];
   incrementUnusedTurns(id: string, updatedAt: number): void;
   markStub(
     id: string,
@@ -124,18 +148,58 @@ export interface CachelaneDb extends Database.Database {
     stubSummary: string | null,
     updatedAt: number
   ): void;
+  restoreStub(params: RestoreStubParams): void;
   insertTurn(params: InsertTurnParams): void;
   getTurn(id: string): TurnRow | null;
   insertBlockReference(params: InsertBlockReferenceParams): number;
+  insertBlockReferences(params: InsertBlockReferenceParams[]): number[];
   getBlockReferencesForTurn(turnId: string): BlockReferenceRow[];
+  updateBlockCounters(params: UpdateBlockCountersParams): void;
+}
+
+export interface UpdateBlockCountersParams {
+  workspace_id: string;
+  session_id: string;
+  turn_number: number;
+  referenced_ids: Set<string>;
+  updated_at: number;
 }
 
 function applyMigrations(db: Database.Database): void {
-  const sql = fs.readFileSync(
-    path.join(MIGRATION_DIR, "001_initial.sql"),
-    "utf-8"
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      id TEXT PRIMARY KEY,
+      applied_at INTEGER NOT NULL
+    )
+  `);
+
+  const applied = new Set(
+    (
+      db
+        .prepare("SELECT id FROM schema_migrations ORDER BY id")
+        .all() as { id: string }[]
+    ).map((row) => row.id),
   );
-  db.exec(sql);
+  const insertMigrationStmt = db.prepare(
+    "INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)",
+  );
+
+  const files = fs
+    .readdirSync(MIGRATION_DIR)
+    .filter((file) => file.endsWith(".sql"))
+    .sort();
+
+  for (const file of files) {
+    const id = path.basename(file, ".sql");
+    if (applied.has(id)) continue;
+
+    const sql = fs.readFileSync(path.join(MIGRATION_DIR, file), "utf-8");
+    const applyOne = db.transaction(() => {
+      db.exec(sql);
+      insertMigrationStmt.run(id, Date.now());
+    });
+    applyOne();
+  }
 }
 
 function tryOpen(dbPath: string): Database.Database {
@@ -174,12 +238,12 @@ export function openDatabase(dbPath: string): CachelaneDb {
       (id, workspace_id, session_id, content_hash, kind, volatility,
        is_pinned, token_count, added_at_turn, last_referenced_at_turn,
        unused_turns, is_stub, stub_summary, refetch_handle,
-       created_at, updated_at)
+       restored_at_turn, created_at, updated_at)
     VALUES
       (@id, @workspace_id, @session_id, @content_hash, @kind, @volatility,
        @is_pinned, @token_count, @added_at_turn, @last_referenced_at_turn,
        @unused_turns, @is_stub, @stub_summary, @refetch_handle,
-       @created_at, @updated_at)
+       @restored_at_turn, @created_at, @updated_at)
   `);
 
   const getBlockStmt = rawDb.prepare("SELECT * FROM blocks WHERE id = ?");
@@ -189,8 +253,40 @@ export function openDatabase(dbPath: string): CachelaneDb {
   );
 
   const markStubStmt = rawDb.prepare(
-    "UPDATE blocks SET is_stub = 1, refetch_handle = ?, stub_summary = ?, updated_at = ? WHERE id = ?"
+    "UPDATE blocks SET is_stub = 1, refetch_handle = ?, stub_summary = ?, restored_at_turn = NULL, updated_at = ? WHERE id = ?"
   );
+
+  const restoreStubStmt = rawDb.prepare(`
+    UPDATE blocks
+    SET is_stub = 0,
+        unused_turns = 0,
+        last_referenced_at_turn = @turn_number,
+        restored_at_turn = @turn_number,
+        updated_at = @updated_at
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND id = @block_id
+  `);
+
+  const getPrunableBlocksStmt = rawDb.prepare(`
+    SELECT * FROM blocks
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND unused_turns >= @k
+      AND is_stub = 0
+      AND is_pinned = 0
+      AND volatility != 'STABLE'
+      AND refetch_handle IS NOT NULL
+    ORDER BY added_at_turn ASC, id ASC
+  `);
+
+  const getBlocksByIdPrefixStmt = rawDb.prepare(`
+    SELECT * FROM blocks
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND id LIKE @block_id_prefix || '%'
+    ORDER BY id ASC
+  `);
 
   const insertTurnStmt = rawDb.prepare(`
     INSERT INTO turns
@@ -218,6 +314,34 @@ export function openDatabase(dbPath: string): CachelaneDb {
     "SELECT * FROM block_references WHERE turn_id = ? ORDER BY id"
   );
 
+  const resetReferencedBlockStmt = rawDb.prepare(`
+    UPDATE blocks
+    SET unused_turns = 0,
+        last_referenced_at_turn = ?,
+        updated_at = ?
+    WHERE workspace_id = ?
+      AND session_id = ?
+      AND id = ?
+  `);
+
+  const incrementEligibleBlockStmt = rawDb.prepare(`
+    UPDATE blocks
+    SET unused_turns = unused_turns + 1,
+        updated_at = ?
+    WHERE workspace_id = ?
+      AND session_id = ?
+      AND id = ?
+      AND is_stub = 0
+      AND is_pinned = 0
+      AND volatility != 'STABLE'
+  `);
+
+  const getSessionBlockIdsStmt = rawDb.prepare(`
+    SELECT id FROM blocks
+    WHERE workspace_id = ?
+      AND session_id = ?
+  `);
+
   const db = rawDb as CachelaneDb;
 
   db.insertBlock = (p: InsertBlockParams) =>
@@ -225,10 +349,17 @@ export function openDatabase(dbPath: string): CachelaneDb {
       ...p,
       is_pinned: p.is_pinned ? 1 : 0,
       is_stub: p.is_stub ? 1 : 0,
+      restored_at_turn: p.restored_at_turn ?? null,
     });
 
   db.getBlock = (id: string) =>
     (getBlockStmt.get(id) as BlockRow | undefined) ?? null;
+
+  db.getPrunableBlocks = (p: GetPrunableBlocksParams) =>
+    getPrunableBlocksStmt.all(p) as BlockRow[];
+
+  db.getBlocksByIdPrefix = (p: GetBlocksByIdPrefixParams) =>
+    getBlocksByIdPrefixStmt.all(p) as BlockRow[];
 
   db.incrementUnusedTurns = (id: string, updatedAt: number) =>
     void incrementUnusedTurnsStmt.run(updatedAt, id);
@@ -240,6 +371,8 @@ export function openDatabase(dbPath: string): CachelaneDb {
     updatedAt: number
   ) => void markStubStmt.run(refetchHandle, stubSummary, updatedAt, id);
 
+  db.restoreStub = (p: RestoreStubParams) => void restoreStubStmt.run(p);
+
   db.insertTurn = (p: InsertTurnParams) => void insertTurnStmt.run(p);
 
   db.getTurn = (id: string) =>
@@ -250,8 +383,42 @@ export function openDatabase(dbPath: string): CachelaneDb {
     return Number(info.lastInsertRowid);
   };
 
+  db.insertBlockReferences = rawDb.transaction(
+    (params: InsertBlockReferenceParams[]): number[] =>
+      params.map((p) => {
+        const info = insertBlockReferenceStmt.run(p);
+        return Number(info.lastInsertRowid);
+      }),
+  ) as (params: InsertBlockReferenceParams[]) => number[];
+
   db.getBlockReferencesForTurn = (turnId: string) =>
     getBlockReferencesForTurnStmt.all(turnId) as BlockReferenceRow[];
+
+  db.updateBlockCounters = rawDb.transaction(
+    (p: UpdateBlockCountersParams): void => {
+      const rows = getSessionBlockIdsStmt.all(p.workspace_id, p.session_id) as {
+        id: string;
+      }[];
+      for (const row of rows) {
+        if (p.referenced_ids.has(row.id)) {
+          resetReferencedBlockStmt.run(
+            p.turn_number,
+            p.updated_at,
+            p.workspace_id,
+            p.session_id,
+            row.id,
+          );
+        } else {
+          incrementEligibleBlockStmt.run(
+            p.updated_at,
+            p.workspace_id,
+            p.session_id,
+            row.id,
+          );
+        }
+      }
+    },
+  ) as (p: UpdateBlockCountersParams) => void;
 
   return db;
 }

@@ -1,0 +1,72 @@
+{
+  "filePathTurn": {
+    "turn_number": 3,
+    "assistant_text": "",
+    "tool_calls": [
+      {
+        "name": "Edit",
+        "input": {
+          "file_path": "src/auth.py",
+          "old_string": "before",
+          "new_string": "after"
+        }
+      }
+    ],
+    "blocks_in_prompt": [
+      {
+        "id": "block-file",
+        "id_token": "11111111",
+        "kind": "file_read",
+        "file_path": "/repo/src/auth.py",
+        "content": "def authenticate(): return True"
+      }
+    ]
+  },
+  "idTokenTurn": {
+    "turn_number": 4,
+    "assistant_text": "I used the prior block a1b2c3d4 to make this decision.",
+    "tool_calls": [],
+    "blocks_in_prompt": [
+      {
+        "id": "block-id",
+        "id_token": "a1b2c3d4",
+        "kind": "tool_output",
+        "content": "Relevant output"
+      }
+    ]
+  },
+  "shingleTurn": {
+    "turn_number": 5,
+    "assistant_text": "The important line was: abcdefghijabcdefghijabcdefghijabcdefghij and that explains it.",
+    "tool_calls": [],
+    "blocks_in_prompt": [
+      {
+        "id": "block-shingle",
+        "id_token": "22222222",
+        "kind": "prior_turn",
+        "content": "prefix abcdefghijabcdefghijabcdefghijabcdefghij suffix"
+      }
+    ]
+  },
+  "negativeTurn": {
+    "turn_number": 6,
+    "assistant_text": "This response is unrelated.",
+    "tool_calls": [
+      {
+        "name": "Read",
+        "input": {
+          "file_path": "src/other.py"
+        }
+      }
+    ],
+    "blocks_in_prompt": [
+      {
+        "id": "block-negative",
+        "id_token": "33333333",
+        "kind": "file_read",
+        "file_path": "src/auth.py",
+        "content": "nothing here should match"
+      }
+    ]
+  }
+}

@@ -52,6 +52,7 @@ describe("types", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
     };
     expect(block.volatility).toBe("SEMI");
     expect(block.refetch_handle).toBeNull();
@@ -73,6 +74,7 @@ describe("types", () => {
       is_stub: true,
       stub_summary: "Read auth.py:23-89 (1.2 KB elided)",
       refetch_handle: "view:auth.py:23-89",
+      restored_at_turn: 6,
     };
     expect(stub.is_stub).toBe(true);
     expect(stub.refetch_handle).toBe("view:auth.py:23-89");

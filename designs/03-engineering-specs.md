@@ -351,8 +351,8 @@ interface PrefixState {
 | AC-2 | Cache-stability suite includes ≥ 5 scenarios (empty schemas; large schemas; middle included; middle empty; active-pruning stub-just-created) | REQ-NF-012 |
 | AC-3 | Cache-stability test failure blocks merge with no exceptions | REQ-NF-020 |
 | AC-4 | PRs modifying `cache_control` breakpoint placement pass cache-stability test twice on independent runs | REQ-NF-021 |
-| AC-5 | Reference-detection precision ≥ 95% and recall ≥ 85% against the 100-session corpus, asserted in CI | REQ-NF-008, REQ-NF-009 |
-| AC-6 | The 100-session annotated corpus exists in-repo **before** any pruner code is written | §6.3 Step 1 |
+| AC-5 | Reference-detection precision ≥ 95% and recall ≥ 85% against an independent annotated corpus, asserted in CI. The current bootstrapped corpus is regression-only until Q001 is independently resolved. | REQ-NF-008, REQ-NF-009 |
+| AC-6 | An independent annotated corpus exists in-repo **before** any pruner code is treated as quality-gated | §6.3 Step 1 |
 | AC-7 | Each major component PR includes a spec-to-code diff document mapping every named spec concept to its code symbol | §6.4 |
 | AC-8 | _removed_ — see REQ-NF-013 waiver. M1 scaffolding bundle grandfathered; no PR LOC cap enforced. | _n/a_ |
 | AC-9 | Every PR includes its own tests; no "tests in follow-up" merges | REQ-NF-014 |

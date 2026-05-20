@@ -361,14 +361,16 @@ lifetime. Telemetry payload allowlist prevents key inclusion.
 | **M1: Foundations** | `types`, `config`, `storage`, `tokenizer` modules; SQLite schema applied; tokenizer model-lookup test passes for 4.6 and 4.7 | Unit tests per module |
 | **M2: Classifier** | `classifier` module; classifies every `BlockKind` correctly against fixture set | Unit tests covering all §3.2 BlockKind entries |
 | **M3: Orchestrator core** | Reorderer, breakpoint placement, request mutation. No pruning yet. | **Cache-stability test active and gating**: SHA-256 of prefix region byte-identical across 3 consecutive identical-input runs |
-| **M4: Reference detection** | PostResponse hook, reference detection, storage updates. **PREREQUISITE: 100-session annotated corpus complete before M4 begins (6-hour human annotation task; start during M2 or M3 so it's ready in time)** | Precision ≥ 95%, recall ≥ 85% on corpus (CI gate) |
-| **M5: K-pruner** | Stub materialisation, refetch flow, `cachelane:expand` | Integration test: 6-turn synthetic session; pruning kicks in at turn 4 |
+| **M4: Reference detection** | PostResponse hook, reference detection, storage updates. Bootstrapped in-repo corpus fixture for CI wiring; independent annotated corpus remains required before M5 quality gating. | Precision ≥ 95%, recall ≥ 85% on corpus (CI gate); bootstrapped fixture is regression-only |
+| **M5: K-pruner** | Stub materialisation, internal refetch service API, one-turn suffix warming after restore | Integration test: 6-turn synthetic session; pruning kicks in at turn 4 |
 | **M6: Keepalive** | Background worker, adaptive + auto policies | Time-mocked integration test: verify pings fire only when expected |
-| **M7: MCP server + CLI** | `cachelane:stats`, `cachelane:explain` wired; all CLI commands | E2E test against recorded Claude Code session |
+| **M7: MCP server + CLI** | `cachelane:stats`, `cachelane:explain`, `cachelane:expand` transport, all CLI commands | E2E test against recorded Claude Code session |
 | **M8: Polish + benchmark** | Docs, README, benchmark harness, optional keepalive experiment (§2.4) | Empirical benchmark report; `doctor` passes on macOS, Linux, Windows |
 | **M9: Release** | npm publish with provenance; Claude Code marketplace listing | Tag, release notes, manual smoke test on fresh machine |
 
-**Critical dependency:** The 100-session annotated corpus gates M4 and must start during M2 or M3.
+**Critical dependency:** Independent annotated corpus validation gates M5. The current M4 fixture is
+bootstrapped from real CacheLane sessions for regression coverage, but does not replace the original
+independent precision/recall validation target.
 
 ---
 

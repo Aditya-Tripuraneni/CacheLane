@@ -1,7 +1,7 @@
-import type { PrefixState, TtlClass } from "../types/index.js";
+import type { CacheTier, PrefixState } from "../types/index.js";
 import type { Classification } from "../classifier/index.js";
 
-export type AnthropicCacheControl = { type: "ephemeral"; ttl: TtlClass };
+export type AnthropicCacheControl = { type: "ephemeral"; ttl: CacheTier };
 
 export type AnthropicTextContent = {
   type: "text";
