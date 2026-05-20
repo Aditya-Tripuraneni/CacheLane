@@ -26,6 +26,7 @@ const SCENARIOS = [
   "scenario-3-middle-included",
   "scenario-4-middle-empty",
   "scenario-5-stub-just-created",
+  "scenario-6-middle-promoted",
 ];
 
 // REQ-NF-010, AC-1, AC-3: same logical input produced through 3 consecutive runs
@@ -38,7 +39,11 @@ describe.each(SCENARIOS)("cache-stability %s", (name) => {
     for (let i = 0; i < 3; i++) {
       const tracker = new CacheStateTracker();
       if (fixture.prev_state) {
-        tracker.update(fixture.input.workspace_id, fixture.prev_state);
+        tracker.update(
+          fixture.input.workspace_id,
+          fixture.input.session_id,
+          fixture.prev_state,
+        );
       }
       const out = orchestrate(fixture.input, tracker);
       hashes.push(out.prefix_hash);

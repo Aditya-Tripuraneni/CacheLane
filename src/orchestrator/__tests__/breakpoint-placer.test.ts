@@ -72,4 +72,17 @@ describe("placeBreakpoints", () => {
     const result = placeBreakpoints(baseRequest, boundaries, prevState);
     expect(result.include_middle_breakpoint).toBe(false);
   });
+
+  it("does not throw or infinite-loop when input_schema contains a circular reference", () => {
+    const circular: Record<string, unknown> = { type: "object" };
+    circular["self"] = circular;
+    const requestWithCycle: AnthropicMessagesRequest = {
+      ...baseRequest,
+      tools: [{ name: "Cycle", input_schema: circular }],
+    };
+    const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+    expect(() =>
+      placeBreakpoints(requestWithCycle, boundaries, undefined),
+    ).not.toThrow();
+  });
 });
