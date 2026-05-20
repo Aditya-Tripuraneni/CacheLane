@@ -55,4 +55,15 @@ describe("CacheStateTracker", () => {
     // s-2 write must not have clobbered s-1
     expect(t.get("ws-1", "s-1")?.middle_hash).toBe("middle-a");
   });
+
+  it("returns active entries for keepalive iteration", () => {
+    const t = new CacheStateTracker();
+    t.update("ws-1", "s-1", makeState("ws-1", "a"));
+    t.update("ws-2", "s-2", makeState("ws-2", "b"));
+
+    expect(t.entries()).toEqual([
+      { workspace_id: "ws-1", session_id: "s-1", state: makeState("ws-1", "a") },
+      { workspace_id: "ws-2", session_id: "s-2", state: makeState("ws-2", "b") },
+    ]);
+  });
 });

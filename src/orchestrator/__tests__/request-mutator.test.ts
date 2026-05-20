@@ -40,6 +40,15 @@ describe("mutateRequest", () => {
     });
   });
 
+  it("uses the supplied prefix TTL for the prefix marker", () => {
+    const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
+    const out = mutateRequest(baseRequest, boundaries, breakpoints, "1h");
+    expect(out.tools?.at(-1)?.cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "1h",
+    });
+  });
+
   it("adds cache_control marker to the last SEMI message when middle breakpoint included", () => {
     const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
     const out = mutateRequest(baseRequest, boundaries, breakpoints);

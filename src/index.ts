@@ -5,5 +5,6 @@ export * from "./tokenizer/index.js";
 export * from "./classifier/index.js";
 export * from "./references/index.js";
 export * from "./pruner/index.js";
+export * from "./keepalive/index.js";
 export * from "./hooks/pre-request.js";
 export * from "./hooks/post-response.js";

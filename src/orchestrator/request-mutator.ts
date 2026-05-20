@@ -2,17 +2,22 @@ import type {
   AnthropicCacheControl,
   AnthropicMessagesRequest,
   Breakpoints,
+  PrefixState,
   RegionBoundaries,
 } from "./types.js";
 
-const PREFIX_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
 const MIDDLE_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
 
 export function mutateRequest(
   originalRequest: AnthropicMessagesRequest,
   boundaries: RegionBoundaries,
   breakpoints: Breakpoints,
+  prefixTtl: PrefixState["ttl_class"] = "5m",
 ): AnthropicMessagesRequest {
+  const prefixMarker: AnthropicCacheControl = {
+    type: "ephemeral",
+    ttl: prefixTtl,
+  };
   const out: AnthropicMessagesRequest = {
     ...originalRequest,
     system: originalRequest.system?.map((s) => ({ ...s })),
@@ -25,9 +30,9 @@ export function mutateRequest(
 
   // Prefix breakpoint: marker on the last tool, or the last system block if no tools.
   if (out.tools && out.tools.length > 0) {
-    out.tools[out.tools.length - 1].cache_control = PREFIX_MARKER;
+    out.tools[out.tools.length - 1].cache_control = prefixMarker;
   } else if (out.system && out.system.length > 0) {
-    out.system[out.system.length - 1].cache_control = PREFIX_MARKER;
+    out.system[out.system.length - 1].cache_control = prefixMarker;
   }
 
   // Middle breakpoint: marker on the last content item of the last SEMI message.
