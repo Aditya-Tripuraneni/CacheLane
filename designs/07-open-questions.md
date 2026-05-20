@@ -11,7 +11,7 @@ contradictions identified during synthesis.
 
 | ID | Question | Status | Owner | Target |
 |----|----------|--------|-------|--------|
-| Q001 | Reference-detection precision/recall | **Unresolved — blocks M4** | Lead engineer | 2 weeks after Phase 2 approval |
+| Q001 | Reference-detection precision/recall | **Partially resolved — bootstrapped CI fixture exists; independent corpus still required** | Lead engineer | Before M5 |
 | Q002 | Classifier accuracy on real-world content | Unresolved | Lead engineer | 2 weeks (parallel with Q001) |
 | Q003 | Optimal K value(s) | Unresolved | Lead engineer | 3 weeks after approval |
 | Q004 | Cache-control breakpoint placement for stable middle | Resolved in SDD | Lead engineer | Covered by M3 |
@@ -21,7 +21,7 @@ contradictions identified during synthesis.
 | Q008 | Tokenizer model-string table | Unresolved | Lead engineer | 2 days |
 | Q009 | `tool_use`/`tool_result` pair atomicity | **Resolved in SDD** | — | — |
 | Q_A | Keepalive experiment funding (Option A/B/C) | **Unresolved — decision needed** | Project lead | Before M8 |
-| Q010 | Refetch interaction with reorderer on next turn | Unresolved | Lead engineer | With M5 |
+| Q010 | Refetch interaction with reorderer on next turn | **Resolved in M5** | — | — |
 | Q011 | Mid-turn error and turn-end semantics | Unresolved | Lead engineer | With orchestrator impl |
 | Q012 | Reference-detection semantics beyond the 3-signal rule | Resolved (3-signal rule is binding) | — | — |
 
@@ -39,17 +39,24 @@ sessions?
 K-pruning saves fewer tokens. If recall is low, blocks are stubbed when they shouldn't be, causing
 unnecessary refetch round-trips.
 
-**Resolution path:**
-1. Build a 100-session annotated corpus (6-hour human task — **must start during M2 or M3**)
-2. Run the three-signal detector against the corpus
-3. Measure precision and recall; CI gate asserts ≥ 95% / ≥ 85%
-4. Only after this gate passes does M4 proceed
+**Current status:** M4 has a bootstrapped in-repo corpus fixture generated from three real
+CacheLane Claude Code sessions. The fixture exercises the CI wiring and regression path, but its
+residual labels were prefilled from the deterministic detector and reconciled to detector positives.
+It is therefore **not independent quality evidence**.
 
-**Blocks:** M4 (Reference detection milestone). The corpus must exist in-repo before pruner code
-is written (AC-6).
+**Resolution path:**
+1. Keep the bootstrapped fixture as a regression corpus for CI wiring.
+2. Build an independent annotated corpus before M5 K-pruner work is treated as quality-gated:
+   either the original 100-session target, or a smaller statistically-justified sample with
+   documented reviewer sign-off.
+3. Run the three-signal detector against the independent corpus.
+4. Measure precision and recall; CI gate asserts ≥ 95% / ≥ 85%.
+
+**Blocks:** M5 quality gate. The bootstrapped fixture unblocks M4 implementation wiring, but
+independent validation remains required before pruner behavior depends on these counters.
 
 **Owner:** Lead engineer  
-**Target:** 2 weeks after Phase 2 approval
+**Target:** Before M5
 
 ---
 
@@ -197,13 +204,15 @@ Reorderer treat it on the immediately following turn?
 the Classifier re-evaluates its volatility. If it was originally `SEMI`, it may now qualify for
 the middle region, but its `unused_turns` counter is 0.
 
-**Open sub-questions:**
-- Does the Reorderer immediately place it back in the middle/prefix, or does it stay in the suffix
-  for one "warming" turn?
-- Does the stable-middle heuristic (byte-identical twice) apply to a re-restored block?
+**Resolution:** M5 records `restored_at_turn` on the block row when
+`cachelane:expand` returns its trusted refetch request. On the immediately
+following turn (`restored_at_turn === current_turn - 1`), PreRequest forces the
+restored block's message classification to `VOLATILE`, keeping it suffix-only
+for one warming turn. On later turns, normal classifier and reorderer behavior
+resumes, including the stable-middle byte-identical heuristic.
 
-**Owner:** Lead engineer  
-**Target:** With M5 implementation
+**Owner:** —  
+**Target:** —
 
 ---
 
@@ -250,4 +259,4 @@ The quality gate (≥ 95% precision, ≥ 85% recall on the corpus) is the accept
 | C5 | Keepalive sequence not diagrammed | **Fixed: D5 added in Diagrams v2.** 10-second check loop, idle + expiry conditions shown. |
 | C6 | `/compact` handling not diagrammed | **Fixed: D6 added in Diagrams v2.** Full sequence: hash detection → block removal → SEMI classification → deferred breakpoint. |
 | C7 | Refetch flow not diagrammed | **Fixed: D7 added in Diagrams v2.** Full sequence: `cachelane:expand` → SQLite lookup → original tool call → counter reset. |
-| C8 | 100-session corpus dependency implicit | **Fixed in Systems Design M4 milestone:** "PREREQUISITE: 100-session annotated corpus complete before M4 begins. 6-hour human annotation task; start during M2 or M3." |
+| C8 | 100-session corpus dependency implicit | **Partially fixed:** M4 now has a bootstrapped in-repo regression corpus, but independent precision/recall validation remains tracked by Q001 before M5. |

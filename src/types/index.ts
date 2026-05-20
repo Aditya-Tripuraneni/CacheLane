@@ -34,6 +34,7 @@ export interface Block {
   is_stub: boolean;
   stub_summary: string | null;
   refetch_handle: string | null;
+  restored_at_turn: number | null;
 }
 
 export interface PrefixState {
