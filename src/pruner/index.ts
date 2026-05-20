@@ -154,10 +154,19 @@ function expandFailure(
   return { ok: false, error: { code, message } };
 }
 
+const EXPAND_BLOCK_ID_PREFIX_RE = /^[A-Za-z0-9]{8}$/;
+
 export function expandStub(
   db: CachelaneDb,
   params: ExpandStubParams,
 ): ExpandStubResult {
+  if (!EXPAND_BLOCK_ID_PREFIX_RE.test(params.block_id)) {
+    return expandFailure(
+      "invalid_block_id",
+      "Block id must be an 8-character alphanumeric prefix",
+    );
+  }
+
   const rows = db.getBlocksByIdPrefix({
     workspace_id: params.workspace_id,
     session_id: params.session_id,

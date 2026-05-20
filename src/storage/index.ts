@@ -284,7 +284,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
     SELECT * FROM blocks
     WHERE workspace_id = @workspace_id
       AND session_id = @session_id
-      AND id LIKE @block_id_prefix || '%'
+      AND substr(id, 1, length(@block_id_prefix)) = @block_id_prefix
     ORDER BY id ASC
   `);
 
@@ -314,32 +314,40 @@ export function openDatabase(dbPath: string): CachelaneDb {
     "SELECT * FROM block_references WHERE turn_id = ? ORDER BY id"
   );
 
-  const resetReferencedBlockStmt = rawDb.prepare(`
-    UPDATE blocks
-    SET unused_turns = 0,
-        last_referenced_at_turn = ?,
-        updated_at = ?
-    WHERE workspace_id = ?
-      AND session_id = ?
-      AND id = ?
+  rawDb.exec(`
+    CREATE TEMP TABLE IF NOT EXISTS cachelane_referenced_ids (
+      id TEXT PRIMARY KEY
+    )
   `);
 
-  const incrementEligibleBlockStmt = rawDb.prepare(`
+  const clearReferencedIdsStmt = rawDb.prepare(
+    "DELETE FROM cachelane_referenced_ids"
+  );
+
+  const insertReferencedIdStmt = rawDb.prepare(
+    "INSERT OR IGNORE INTO cachelane_referenced_ids (id) VALUES (?)"
+  );
+
+  const resetReferencedBlocksStmt = rawDb.prepare(`
+    UPDATE blocks
+    SET unused_turns = 0,
+        last_referenced_at_turn = @turn_number,
+        updated_at = @updated_at
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND id IN (SELECT id FROM cachelane_referenced_ids)
+  `);
+
+  const incrementEligibleBlocksStmt = rawDb.prepare(`
     UPDATE blocks
     SET unused_turns = unused_turns + 1,
-        updated_at = ?
-    WHERE workspace_id = ?
-      AND session_id = ?
-      AND id = ?
+        updated_at = @updated_at
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND id NOT IN (SELECT id FROM cachelane_referenced_ids)
       AND is_stub = 0
       AND is_pinned = 0
       AND volatility != 'STABLE'
-  `);
-
-  const getSessionBlockIdsStmt = rawDb.prepare(`
-    SELECT id FROM blocks
-    WHERE workspace_id = ?
-      AND session_id = ?
   `);
 
   const db = rawDb as CachelaneDb;
@@ -396,27 +404,12 @@ export function openDatabase(dbPath: string): CachelaneDb {
 
   db.updateBlockCounters = rawDb.transaction(
     (p: UpdateBlockCountersParams): void => {
-      const rows = getSessionBlockIdsStmt.all(p.workspace_id, p.session_id) as {
-        id: string;
-      }[];
-      for (const row of rows) {
-        if (p.referenced_ids.has(row.id)) {
-          resetReferencedBlockStmt.run(
-            p.turn_number,
-            p.updated_at,
-            p.workspace_id,
-            p.session_id,
-            row.id,
-          );
-        } else {
-          incrementEligibleBlockStmt.run(
-            p.updated_at,
-            p.workspace_id,
-            p.session_id,
-            row.id,
-          );
-        }
+      clearReferencedIdsStmt.run();
+      for (const id of p.referenced_ids) {
+        insertReferencedIdStmt.run(id);
       }
+      resetReferencedBlocksStmt.run(p);
+      incrementEligibleBlocksStmt.run(p);
     },
   ) as (p: UpdateBlockCountersParams) => void;
 

@@ -13,8 +13,8 @@ interface EvalModule {
 }
 
 async function loadEvalModule(): Promise<EvalModule> {
-  const evalPath = ["..", "..", "..", "scripts", "corpus", "eval.js"].join("/");
-  const mod = (await import(evalPath)) as EvalModule;
+  const evalUrl = new URL("../../../scripts/corpus/eval.ts", import.meta.url);
+  const mod = (await import(evalUrl.href)) as EvalModule;
   return mod;
 }
 

@@ -506,4 +506,35 @@ describe("openDatabase", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe("01PREFIX000000000000001");
   });
+
+  it("getBlocksByIdPrefix treats SQL wildcard characters as literal prefix characters", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const now = Date.now();
+    db.insertBlock({
+      id: "01PREFIX000000000000002",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      content_hash: "b".repeat(64),
+      kind: "stub",
+      volatility: "VOLATILE",
+      is_pinned: false,
+      token_count: 50,
+      added_at_turn: 1,
+      last_referenced_at_turn: 1,
+      unused_turns: 3,
+      is_stub: true,
+      stub_summary: "stub",
+      refetch_handle: "tool:read:src/auth.ts",
+      created_at: now,
+      updated_at: now,
+    });
+
+    const rows = db.getBlocksByIdPrefix({
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      block_id_prefix: "01%",
+    });
+
+    expect(rows).toHaveLength(0);
+  });
 });

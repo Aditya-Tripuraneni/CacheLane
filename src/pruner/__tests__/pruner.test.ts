@@ -301,15 +301,36 @@ describe("expandStub", () => {
     }
   });
 
+  it("rejects wildcard-containing prefixes before querying storage", () => {
+    insertBlock("01KWILD1000000000000001", {
+      is_stub: true,
+      unused_turns: 3,
+      stub_summary: "Read src/auth.ts (250 tokens elided)",
+    });
+
+    const result = expandStub(db, {
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      block_id: "01K%WILD",
+      turn_number: 6,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("invalid_block_id");
+    }
+    expect(db.getBlock("01KWILD1000000000000001")?.is_stub).toBe(1);
+  });
+
   it("fails deterministically for non-stub blocks", () => {
-    insertBlock("01KEXPAND000000000000003", {
+    insertBlock("01KNOSTB000000000000001", {
       is_stub: false,
     });
 
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KEXPAND000000000000003",
+      block_id: "01KNOSTB",
       turn_number: 6,
     });
 
@@ -320,7 +341,7 @@ describe("expandStub", () => {
   });
 
   it("fails deterministically when a stub has no refetch handle", () => {
-    insertBlock("01KEXPAND000000000000004", {
+    insertBlock("01KNOHND000000000000001", {
       is_stub: true,
       refetch_handle: null,
       stub_summary: "missing handle",
@@ -329,7 +350,7 @@ describe("expandStub", () => {
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KEXPAND000000000000004",
+      block_id: "01KNOHND",
       turn_number: 6,
     });
 

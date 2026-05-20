@@ -71,6 +71,7 @@ export interface TrustedRefetchRequest {
 }
 
 export type ExpandStubErrorCode =
+  | "invalid_block_id"
   | "missing_block"
   | "ambiguous_prefix"
   | "not_stub"

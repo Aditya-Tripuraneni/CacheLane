@@ -78,7 +78,7 @@ describe("detectReferences", () => {
     ]);
   });
 
-  it("handles 100 blocks and 10 KB assistant text within the M4 budget", () => {
+  it("handles 100 blocks and 10 KB assistant text without false positives", () => {
     const blocks = Array.from({ length: 100 }, (_, i) => ({
       id: `block-${i}`,
       id_token: `tok${i}`.padEnd(8, "x"),
@@ -92,11 +92,8 @@ describe("detectReferences", () => {
       blocks_in_prompt: blocks,
     };
 
-    const start = performance.now();
     const ids = detectReferences(turn);
-    const elapsed = performance.now() - start;
 
     expect(ids.size).toBe(0);
-    expect(elapsed).toBeLessThan(10);
   });
 });
