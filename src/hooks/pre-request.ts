@@ -1,6 +1,10 @@
 import type { Classification } from "../classifier/index.js";
 import type { CachelaneConfig } from "../types/index.js";
-import type { CachelaneDb } from "../storage/index.js";
+import type {
+  CachelaneDb,
+  TurnExplanationBlockMetadata,
+  TurnExplanationRegionMetadata,
+} from "../storage/index.js";
 import {
   materializePrunedBlocks,
   pruneExpiredBlocks,
@@ -19,6 +23,7 @@ export interface PreRequestInput {
   tracker: CacheStateTracker;
   workspace_id: string;
   session_id: string;
+  turn_id?: string;
   current_turn: number;
   original_request: AnthropicMessagesRequest;
   message_classifications: Classification[];
@@ -76,6 +81,89 @@ function applyOneTurnSuffixWarming(
   });
 }
 
+function fallbackTurnId(input: PreRequestInput): string {
+  return `${input.workspace_id}:${input.session_id}:${input.current_turn}`;
+}
+
+function explainBlockMetadata(
+  placements: PromptBlockPlacement[],
+): TurnExplanationBlockMetadata[] {
+  return placements.map((placement) => ({
+    block_id: placement.block_id,
+    message_index: placement.message_index,
+    content_index: placement.content_index,
+    kind: placement.kind,
+    volatility: placement.volatility,
+    is_pinned: placement.is_pinned,
+    has_refetch_handle: placement.refetch_handle !== null,
+    restored_at_turn: placement.restored_at_turn ?? null,
+  }));
+}
+
+function explainRegionMetadata(
+  classifications: Classification[],
+): TurnExplanationRegionMetadata {
+  let stable_count = 0;
+  let semi_count = 0;
+  let volatile_count = 0;
+
+  for (const classification of classifications) {
+    if (classification.volatility === "STABLE") {
+      stable_count++;
+    } else if (classification.volatility === "SEMI") {
+      semi_count++;
+    } else {
+      volatile_count++;
+    }
+  }
+
+  return {
+    message_count: classifications.length,
+    stable_count,
+    semi_count,
+    volatile_count,
+  };
+}
+
+function recordExplanation(
+  input: PreRequestInput,
+  result: PreRequestResult,
+): void {
+  if (typeof input.db.insertTurnExplanation !== "function") return;
+
+  const now = input.now_ms ?? Date.now();
+  try {
+    input.db.insertTurnExplanation({
+      turn_id: input.turn_id ?? fallbackTurnId(input),
+      workspace_id: input.workspace_id,
+      session_id: input.session_id,
+      turn_number: input.current_turn,
+      model: input.original_request.model,
+      prefix_breakpoint_hash: result.prefix_hash || null,
+      middle_breakpoint_hash: result.middle_hash,
+      mutated: result.mutated,
+      pruned_blocks_count: result.pruned_blocks_count,
+      prune_decisions: result.prune_decisions.map((decision) => ({
+        block_id: decision.block_id,
+        action: decision.action,
+        reason: decision.reason,
+        kind: decision.kind,
+        stub_summary: decision.stub_summary,
+        has_refetch_handle: decision.refetch_handle.length > 0,
+      })),
+      block_metadata: explainBlockMetadata(input.block_placements),
+      region_metadata: explainRegionMetadata(
+        result.effective_message_classifications,
+      ),
+      signals: result.signals,
+      created_at: now,
+      updated_at: now,
+    });
+  } catch (err) {
+    console.error("[cachelane] pre-request explain log error", err);
+  }
+}
+
 export function handlePreRequest(input: PreRequestInput): PreRequestResult {
   try {
     const pruneResult = pruneExpiredBlocks(input.db, {
@@ -107,12 +195,14 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       input.tracker,
     );
 
-    return {
+    const result = {
       ...orchestrated,
       pruned_blocks_count: pruneResult.pruned_blocks_count,
       prune_decisions: pruneResult.decisions,
       effective_message_classifications: effectiveClassifications,
     };
+    recordExplanation(input, result);
+    return result;
   } catch (err) {
     console.error("[cachelane] pre-request error", err);
     return fallbackResult(input);

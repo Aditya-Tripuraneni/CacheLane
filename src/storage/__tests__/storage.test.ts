@@ -47,6 +47,14 @@ describe("openDatabase", () => {
     expect(columns.map((column) => column.name)).toContain("restored_at_turn");
   });
 
+  it("applies turn_explanations migration", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[];
+    expect(tables.map((table) => table.name)).toContain("turn_explanations");
+  });
+
   it("applies all six spec indexes by exact name", () => {
     db = openDatabase(path.join(tmpDir, "test.db"));
     const indexes = db
@@ -184,6 +192,126 @@ describe("openDatabase", () => {
     expect(turn!.cache_read_tokens).toBe(500);
     expect(turn!.output_tokens).toBe(80);
     expect(turn!.effective_cost_units).toBeCloseTo(1500, 5);
+  });
+
+  it("insertTurnExplanation round-trips metadata without content fields", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const now = Date.now();
+
+    db.insertTurnExplanation({
+      turn_id: "turn-explain-1",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_number: 3,
+      model: "claude-opus-4-7",
+      prefix_breakpoint_hash: "a".repeat(64),
+      middle_breakpoint_hash: null,
+      mutated: true,
+      pruned_blocks_count: 1,
+      prune_decisions: [
+        {
+          block_id: "01EXPLAIN0000000000001",
+          action: "stubbed",
+          reason: "unused_turns >= 3",
+          kind: "tool_output",
+          stub_summary: "tool_output tool:read:src/auth.ts (100 tokens elided)",
+          has_refetch_handle: true,
+        },
+      ],
+      block_metadata: [
+        {
+          block_id: "01EXPLAIN0000000000001",
+          message_index: 0,
+          content_index: 0,
+          kind: "tool_output",
+          volatility: "VOLATILE",
+          is_pinned: false,
+          has_refetch_handle: true,
+        },
+      ],
+      region_metadata: {
+        message_count: 2,
+        stable_count: 0,
+        semi_count: 1,
+        volatile_count: 1,
+      },
+      signals: ["prefix_cached"],
+      created_at: now,
+      updated_at: now,
+    });
+
+    const explanation = db.getTurnExplanation({
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_number: 3,
+    });
+    expect(explanation).toMatchObject({
+      turn_id: "turn-explain-1",
+      pruned_blocks_count: 1,
+      mutated: true,
+      usage: { input_tokens: 0, cache_read_tokens: 0 },
+    });
+
+    const raw = db
+      .prepare("SELECT * FROM turn_explanations WHERE turn_id = ?")
+      .get("turn-explain-1") as Record<string, unknown>;
+    expect(Object.keys(raw).some((key) => /content|prompt|assistant/i.test(key))).toBe(false);
+  });
+
+  it("getStats aggregates scoped cost, cache reads, pruning, and keepalive", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const now = Date.now();
+    const baseTurn = {
+      model: "claude-opus-4-7",
+      output_tokens: 0,
+      prefix_breakpoint_hash: null,
+      middle_breakpoint_hash: null,
+      created_at: now,
+    };
+
+    db.insertTurn({
+      ...baseTurn,
+      id: "turn-stats-1",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_number: 1,
+      input_tokens: 100,
+      cache_creation_5m_tokens: 0,
+      cache_creation_1h_tokens: 0,
+      cache_read_tokens: 900,
+      effective_cost_units: 190,
+      pruned_blocks_count: 2,
+      keepalive_pings_since_last_turn: 1,
+    });
+    db.insertTurn({
+      ...baseTurn,
+      id: "turn-stats-2",
+      workspace_id: "ws-1",
+      session_id: "sess-2",
+      turn_number: 1,
+      input_tokens: 200,
+      cache_creation_5m_tokens: 0,
+      cache_creation_1h_tokens: 0,
+      cache_read_tokens: 0,
+      effective_cost_units: 200,
+      pruned_blocks_count: 0,
+      keepalive_pings_since_last_turn: 0,
+    });
+
+    const stats = db.getStats({
+      scope: "session",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+    });
+
+    expect(stats).toMatchObject({
+      turns: 1,
+      cache_hit_ratio: 0.9,
+      effective_cost_units: 190,
+      baseline_cost_units: 1000,
+      pruner_counts: { pruned_blocks: 2, turns_with_pruning: 1 },
+      keepalive_counts: { pings: 1, turns_with_keepalive: 1 },
+    });
   });
 
   it("markStub sets is_stub=1, refetch_handle and stub_summary", () => {

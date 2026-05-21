@@ -7,5 +7,8 @@ export * from "./references/index.js";
 export * from "./pruner/index.js";
 export * from "./keepalive/index.js";
 export * from "./agent-traces/index.js";
+export * from "./benchmark/index.js";
 export * from "./hooks/pre-request.js";
 export * from "./hooks/post-response.js";
+export * from "./hooks/expand.js";
+export * from "./server/index.js";

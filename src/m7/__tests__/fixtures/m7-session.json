@@ -1,0 +1,36 @@
+{
+  "workspace_id": "ws-m7-e2e",
+  "session_id": "sess-m7-e2e",
+  "turn": {
+    "id": "turn-m7-e2e-1",
+    "turn_number": 6,
+    "model": "claude-opus-4-7",
+    "input_tokens": 120,
+    "output_tokens": 40,
+    "cache_creation_5m_tokens": 0,
+    "cache_creation_1h_tokens": 0,
+    "cache_read_tokens": 880,
+    "effective_cost_units": 208,
+    "prefix_breakpoint_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "middle_breakpoint_hash": null,
+    "pruned_blocks_count": 1,
+    "keepalive_pings_since_last_turn": 1,
+    "created_at": 1715000000000
+  },
+  "block": {
+    "id": "01M7E2E100000000000001",
+    "content_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "kind": "tool_output",
+    "volatility": "VOLATILE",
+    "is_pinned": false,
+    "token_count": 320,
+    "added_at_turn": 1,
+    "last_referenced_at_turn": 1,
+    "unused_turns": 3,
+    "is_stub": true,
+    "stub_summary": "tool_output tool:read:src/storage/index.ts (320 tokens elided)",
+    "refetch_handle": "tool:read:src/storage/index.ts",
+    "created_at": 1715000000000,
+    "updated_at": 1715000000000
+  }
+}

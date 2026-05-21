@@ -104,6 +104,42 @@ describe("handlePostResponse", () => {
     expect(db.getBlock("idle-block")?.unused_turns).toBe(3);
   });
 
+  it("records Anthropic usage fields into the turn row", () => {
+    const turn: ReferenceTurn = {
+      turn_number: 2,
+      assistant_text: "No references here.",
+      tool_calls: [],
+      blocks_in_prompt: [],
+    };
+
+    handlePostResponse({
+      db,
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      turn_number: 2,
+      turn,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 40,
+        ephemeral_5m_input_tokens: 200,
+        ephemeral_1h_input_tokens: 50,
+        cache_read_input_tokens: 1000,
+      },
+      now_ms: 1_715_000_001_000,
+    });
+
+    const updated = db.getTurn("turn-1");
+    expect(updated).toMatchObject({
+      input_tokens: 100,
+      output_tokens: 40,
+      cache_creation_5m_tokens: 200,
+      cache_creation_1h_tokens: 50,
+      cache_read_tokens: 1000,
+      effective_cost_units: 550,
+    });
+  });
+
   it("fails open on detector errors by incrementing eligible counters and not crashing", () => {
     insertBlock("idle-block");
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);

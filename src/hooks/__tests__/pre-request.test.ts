@@ -114,6 +114,38 @@ describe("handlePreRequest", () => {
     });
   });
 
+  it("writes metadata-only turn explanations after pruning and orchestration", () => {
+    const blockId = "01KPREQEXPLAIN00000001";
+    insertBlock(blockId, { unused_turns: 3 });
+
+    handlePreRequest({
+      db,
+      tracker: new CacheStateTracker(),
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_id: "turn-explain-hook",
+      current_turn: 4,
+      original_request: baseRequest("raw fixture prompt content"),
+      message_classifications: [cl("SEMI"), cl("VOLATILE")],
+      block_placements: [placement(blockId)],
+      pruner: { enabled: true, k: 3, mode: "default" },
+      now_ms: 1_715_000_004_000,
+    });
+
+    const explanation = db.getTurnExplanation({
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_number: 4,
+    });
+
+    expect(JSON.stringify(explanation)).not.toContain("raw fixture prompt content");
+    expect(explanation?.pruned_blocks_count).toBe(1);
+    expect(explanation?.block_metadata[0]).toMatchObject({
+      block_id: blockId,
+      has_refetch_handle: true,
+    });
+  });
+
   it("starts pruning a K=3 turn-1 block on turn 4", () => {
     const blockId = "01KPREQ2000000000000001";
     insertBlock(blockId);
