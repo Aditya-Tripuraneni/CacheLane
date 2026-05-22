@@ -53,7 +53,7 @@ describe("mutateRequest", () => {
     const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
     const out = mutateRequest(baseRequest, boundaries, breakpoints);
     const lastSemiMessage = out.messages[1];
-    const lastContent = lastSemiMessage.content.at(-1);
+    const lastContent = lastSemiMessage?.content.at(-1);
     expect(lastContent?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "5m",
@@ -67,7 +67,7 @@ describe("mutateRequest", () => {
       include_middle_breakpoint: false,
     });
     const lastSemiMessage = out.messages[1];
-    const lastContent = lastSemiMessage.content.at(-1);
+    const lastContent = lastSemiMessage?.content.at(-1);
     expect(lastContent?.cache_control).toBeUndefined();
   });
 

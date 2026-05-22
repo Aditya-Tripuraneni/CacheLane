@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import fs from "node:fs";
 
 const corpusDir = "corpus";
@@ -18,6 +18,17 @@ async function loadEvalModule(): Promise<EvalModule> {
   return mod;
 }
 
+// When corpus is absent, emit a visible warning so CI output signals the gap
+// rather than silently passing. Generate corpus via: scripts/corpus/ingest.ts
+beforeAll(() => {
+  if (!corpusReady) {
+    console.warn(
+      "[cachelane] corpus-gate: REQ-NF-008/009 precision/recall tests SKIPPED" +
+        " — corpus/sessions is empty. Run scripts/corpus/ingest.ts to populate.",
+    );
+  }
+});
+
 describe.skipIf(!corpusReady)("M4 corpus gate (REQ-NF-008/009)", () => {
   it("precision >= 95%", async () => {
     const { evaluate, loadCorpus } = await loadEvalModule();
@@ -29,11 +40,5 @@ describe.skipIf(!corpusReady)("M4 corpus gate (REQ-NF-008/009)", () => {
     const { evaluate, loadCorpus } = await loadEvalModule();
     const result = evaluate(loadCorpus(corpusDir));
     expect(result.recall).toBeGreaterThanOrEqual(0.85);
-  });
-});
-
-describe.skipIf(corpusReady)("M4 corpus gate fixture availability", () => {
-  it("is skipped until corpus/sessions is generated from real transcripts", () => {
-    expect(corpusReady).toBe(false);
   });
 });

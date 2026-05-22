@@ -27,6 +27,7 @@ function insertBlock(id: string, overrides: Partial<Parameters<typeof db.insertB
     is_stub: false,
     stub_summary: null,
     refetch_handle: null,
+    restored_at_turn: null,
     created_at: now,
     updated_at: now,
     ...overrides,
@@ -104,7 +105,114 @@ describe("handlePostResponse", () => {
     expect(db.getBlock("idle-block")?.unused_turns).toBe(3);
   });
 
-  it("fails open on detector errors by incrementing eligible counters and not crashing", () => {
+  it("returns empty referenced_ids and ok signal when no references are detected", () => {
+    insertBlock("silent-block");
+
+    const turn: ReferenceTurn = {
+      turn_number: 2,
+      assistant_text: "Nothing here referencing any block.",
+      tool_calls: [],
+      blocks_in_prompt: [
+        {
+          id: "silent-block",
+          id_token: "zzzzzzzz",
+          kind: "tool_output",
+          content: "some content",
+        },
+      ],
+    };
+
+    const result = handlePostResponse({
+      db,
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      turn_number: 2,
+      turn,
+      now_ms: 1_715_000_001_000,
+    });
+
+    expect(result.referenced_ids.size).toBe(0);
+    expect(result.signals).toContain("ok");
+    expect(db.getBlockReferencesForTurn("turn-1")).toHaveLength(0);
+    expect(db.getBlock("silent-block")?.unused_turns).toBe(3);
+  });
+
+  it("fails open when insertBlockReferences throws", () => {
+    insertBlock("some-block");
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const failingDb = {
+      ...db,
+      insertBlockReferences: () => {
+        throw new Error("storage unavailable");
+      },
+    } as unknown as CachelaneDb;
+
+    const turn: ReferenceTurn = {
+      turn_number: 2,
+      assistant_text: "Nothing referencing anything.",
+      tool_calls: [],
+      blocks_in_prompt: [],
+    };
+
+    const result = handlePostResponse({
+      db: failingDb,
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      turn_number: 2,
+      turn,
+      now_ms: 1_715_000_001_000,
+    });
+
+    expect(result.referenced_ids.size).toBe(0);
+    expect(result.signals).toContain("error:fallback");
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("detects tool_call file-path references alongside id_token references", () => {
+    insertBlock("file-block", { refetch_handle: "tool:read:src/auth.ts" });
+    insertBlock("id-block");
+
+    const turn: ReferenceTurn = {
+      turn_number: 2,
+      assistant_text: "Here is the analysis.",
+      tool_calls: [
+        { name: "Read", input: { path: "src/auth.ts" } },
+      ],
+      blocks_in_prompt: [
+        {
+          id: "file-block",
+          file_path: "src/auth.ts",
+          id_token: "filebloc",
+          kind: "file_read",
+          content: "file content",
+        },
+        {
+          id: "id-block",
+          id_token: "idblockk",
+          kind: "tool_output",
+          content: "tool result",
+        },
+      ],
+    };
+
+    const result = handlePostResponse({
+      db,
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_id: "turn-1",
+      turn_number: 2,
+      turn,
+      now_ms: 1_715_000_001_000,
+    });
+
+    expect(result.referenced_ids).toContain("file-block");
+    expect(result.signals).toContain("ok");
+    expect(db.getBlockReferencesForTurn("turn-1").length).toBeGreaterThan(0);
+  });
+
+  it("fails open on detector errors without updating block counters", () => {
     insertBlock("idle-block");
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const turn = null as unknown as ReferenceTurn;
@@ -121,7 +229,8 @@ describe("handlePostResponse", () => {
 
     expect(result.referenced_ids.size).toBe(0);
     expect(result.signals).toContain("error:fallback");
-    expect(db.getBlock("idle-block")?.unused_turns).toBe(3);
+    // Counters must NOT be mutated on detection error
+    expect(db.getBlock("idle-block")?.unused_turns).toBe(2);
     expect(spy).toHaveBeenCalled();
   });
 });

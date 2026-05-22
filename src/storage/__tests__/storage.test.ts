@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import Database from "better-sqlite3";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -25,7 +26,7 @@ describe("openDatabase", () => {
   it("opens in WAL journal mode", () => {
     db = openDatabase(path.join(tmpDir, "test.db"));
     const rows = db.pragma("journal_mode") as { journal_mode: string }[];
-    expect(rows[0].journal_mode).toBe("wal");
+    expect(rows[0]?.journal_mode).toBe("wal");
   });
 
   it("applies schema — blocks, turns, block_references tables exist", () => {
@@ -66,7 +67,7 @@ describe("openDatabase", () => {
   it("passes integrity_check on fresh DB", () => {
     db = openDatabase(path.join(tmpDir, "test.db"));
     const result = db.pragma("integrity_check") as { integrity_check: string }[];
-    expect(result[0].integrity_check).toBe("ok");
+    expect(result[0]?.integrity_check).toBe("ok");
   });
 
   it("renames corrupt file and creates fresh DB", () => {
@@ -83,6 +84,30 @@ describe("openDatabase", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as { name: string }[];
     expect(tables.map((t) => t.name)).toContain("blocks");
+  });
+
+  it("propagates errors that are not file corruption (does not silently rename healthy DB)", () => {
+    // Patch Database.prototype.pragma to throw a non-corruption error once
+    const original = Database.prototype.pragma;
+    let callCount = 0;
+    Database.prototype.pragma = function (this: Database.Database, pragma: string) {
+      // Let journal_mode and foreign_keys pass; throw on integrity_check
+      if (pragma === "integrity_check" && callCount++ === 0) {
+        throw new Error("SQLITE_ERROR: table 'blocks' already exists");
+      }
+      return original.call(this, pragma);
+    };
+
+    const dbPath = path.join(tmpDir, "healthy.db");
+
+    try {
+      // Should throw — NOT silently rename and recreate
+      expect(() => openDatabase(dbPath)).toThrow(/table.*already exists/i);
+      // Confirm it was never created as a valid DB (no rename happened)
+      expect(fs.existsSync(`${dbPath}.corrupt-${Date.now()}`)).toBe(false);
+    } finally {
+      Database.prototype.pragma = original;
+    }
   });
 
   it("insertBlock + getBlock round-trip", () => {
@@ -104,6 +129,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -139,6 +165,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -205,6 +232,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -222,6 +250,54 @@ describe("openDatabase", () => {
     expect(block!.stub_summary).toContain("auth.py");
     expect(block!.restored_at_turn).toBeNull();
     expect(block!.updated_at).toBe(now + 2000);
+  });
+
+  it("markStubs atomically marks multiple blocks as stubs in one transaction", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const NOW = Date.now();
+    const ws = "ws-stubs";
+    const sess = "sess-stubs";
+    for (const id of ["BS1", "BS2", "BS3"]) {
+      db.insertBlock({
+        id,
+        workspace_id: ws,
+        session_id: sess,
+        content_hash: id.padEnd(64, "0"),
+        kind: "file_read",
+        volatility: "SEMI",
+        is_pinned: false,
+        token_count: 50,
+        added_at_turn: 1,
+        last_referenced_at_turn: 1,
+        unused_turns: 5,
+        is_stub: false,
+        stub_summary: null,
+        refetch_handle: `view:${id}.ts:1-10`,
+        restored_at_turn: null,
+        created_at: NOW,
+        updated_at: NOW,
+      });
+    }
+
+    db.markStubs([
+      { id: "BS1", workspace_id: ws, session_id: sess, refetchHandle: "view:BS1.ts:1-10", stubSummary: "BS1 stub", updatedAt: NOW + 1 },
+      { id: "BS2", workspace_id: ws, session_id: sess, refetchHandle: "view:BS2.ts:1-10", stubSummary: "BS2 stub", updatedAt: NOW + 1 },
+      { id: "BS3", workspace_id: ws, session_id: sess, refetchHandle: "view:BS3.ts:1-10", stubSummary: "BS3 stub", updatedAt: NOW + 1 },
+    ]);
+
+    for (const id of ["BS1", "BS2", "BS3"]) {
+      const row = db.getBlock(id)!;
+      expect(row.is_stub).toBe(1);
+      expect(row.stub_summary).toBe(`${id} stub`);
+      expect(row.refetch_handle).toBe(`view:${id}.ts:1-10`);
+      expect(row.updated_at).toBe(NOW + 1);
+    }
+  });
+
+  it("markStubs with empty array is a no-op", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    db.markStubs([]);
+    // no throw, no DB change
   });
 
   it("restoreStub resets counters and records the restore turn", () => {
@@ -243,6 +319,7 @@ describe("openDatabase", () => {
       is_stub: true,
       stub_summary: "Read auth.py:1-50 (800 tokens elided)",
       refetch_handle: "view:auth.py:1-50",
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -282,6 +359,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -313,6 +391,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -354,6 +433,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -389,11 +469,11 @@ describe("openDatabase", () => {
 
     const refs = db.getBlockReferencesForTurn("01TURN000000000000000001");
     expect(refs).toHaveLength(1);
-    expect(refs[0].id).toBe(refId);
-    expect(refs[0].block_id).toBe("01BLOCK00000000000000001");
-    expect(refs[0].reference_type).toBe("tool_call");
-    expect(refs[0].evidence).toBe("tool=Read,path=auth.py");
-    expect(refs[0].created_at).toBe(now);
+    expect(refs[0]?.id).toBe(refId);
+    expect(refs[0]?.block_id).toBe("01BLOCK00000000000000001");
+    expect(refs[0]?.reference_type).toBe("tool_call");
+    expect(refs[0]?.evidence).toBe("tool=Read,path=auth.py");
+    expect(refs[0]?.created_at).toBe(now);
   });
 
   it("insertBlockReferences batch-inserts reference audit rows", () => {
@@ -415,6 +495,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -468,6 +549,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: null,
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     };
@@ -511,6 +593,7 @@ describe("openDatabase", () => {
       is_stub: false,
       stub_summary: null,
       refetch_handle: "tool:read:src/auth.ts",
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     };
@@ -565,6 +648,7 @@ describe("openDatabase", () => {
       is_stub: true,
       stub_summary: "stub",
       refetch_handle: "tool:read:src/auth.ts",
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });
@@ -576,7 +660,7 @@ describe("openDatabase", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].id).toBe("01PREFIX000000000000001");
+    expect(rows[0]?.id).toBe("01PREFIX000000000000001");
   });
 
   it("getBlocksByIdPrefix treats SQL wildcard characters as literal prefix characters", () => {
@@ -597,6 +681,7 @@ describe("openDatabase", () => {
       is_stub: true,
       stub_summary: "stub",
       refetch_handle: "tool:read:src/auth.ts",
+      restored_at_turn: null,
       created_at: now,
       updated_at: now,
     });

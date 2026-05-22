@@ -11,9 +11,9 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
   },
   keepalive: {
     policy: "auto",
-    interval_seconds: 150,
-    idle_threshold_seconds: 240,
-    large_prefix_threshold_tokens: 50000,
+    interval_seconds: 150,          // 2.5 min — ping before 5m TTL expires
+    idle_threshold_seconds: 240,     // 4 min idle before we consider pinging
+    large_prefix_threshold_tokens: 50_000, // above this, assign 1h TTL class
   },
   classification: {
     pin: [],

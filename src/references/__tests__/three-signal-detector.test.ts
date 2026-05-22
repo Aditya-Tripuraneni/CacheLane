@@ -6,7 +6,7 @@ import {
   detectDetailedReferences,
   detectReferences,
 } from "../three-signal-detector.js";
-import type { ReferenceTurn } from "../types.js";
+import type { ReferenceBlock, ReferenceTurn } from "../types.js";
 
 const fixturesPath = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,10 +14,12 @@ const fixturesPath = path.join(
   "reference-turns.json",
 );
 
-const fixtures = JSON.parse(fs.readFileSync(fixturesPath, "utf8")) as Record<
-  string,
-  ReferenceTurn
->;
+const fixtures = JSON.parse(fs.readFileSync(fixturesPath, "utf8")) as {
+  filePathTurn: ReferenceTurn;
+  idTokenTurn: ReferenceTurn;
+  shingleTurn: ReferenceTurn;
+  negativeTurn: ReferenceTurn;
+};
 
 describe("detectReferences", () => {
   it("detects Signal 1: file path in tool-call input using basename fallback", () => {
@@ -42,7 +44,7 @@ describe("detectReferences", () => {
       block_id: "block-shingle",
       reference_type: "text_quote",
     });
-    expect(refs[0].evidence).toMatch(/^shingle_sha256=/);
+    expect(refs[0]?.evidence).toMatch(/^shingle_sha256=/);
   });
 
   it("does not emit false positives for unrelated blocks", () => {
@@ -57,9 +59,9 @@ describe("detectReferences", () => {
         "Mention a1b2c3d4 and quote abcdefghijabcdefghijabcdefghijabcdefghij.",
       tool_calls: [{ name: "Edit", input: { file_path: "src/auth.py" } }],
       blocks_in_prompt: [
-        fixtures.filePathTurn.blocks_in_prompt[0],
-        fixtures.idTokenTurn.blocks_in_prompt[0],
-        fixtures.shingleTurn.blocks_in_prompt[0],
+        fixtures.filePathTurn.blocks_in_prompt[0] as ReferenceBlock,
+        fixtures.idTokenTurn.blocks_in_prompt[0] as ReferenceBlock,
+        fixtures.shingleTurn.blocks_in_prompt[0] as ReferenceBlock,
         {
           id: "block-duplicate",
           id_token: "a1b2c3d4",

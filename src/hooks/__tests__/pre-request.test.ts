@@ -42,6 +42,7 @@ function insertBlock(
     is_stub: false,
     stub_summary: null,
     refetch_handle: "tool:read:src/auth.ts",
+    restored_at_turn: null,
     created_at: now,
     updated_at: now,
     ...overrides,
@@ -104,7 +105,7 @@ describe("handlePreRequest", () => {
     });
 
     expect(result.pruned_blocks_count).toBe(1);
-    expect(result.request.messages[0].content[0]).toEqual({
+    expect(result.request.messages[0]?.content[0]).toEqual({
       type: "text",
       text: "[stub:01KPREQ1] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane:expand(block_id=01KPREQ1)",
     });
@@ -164,7 +165,7 @@ describe("handlePreRequest", () => {
       pruner: { enabled: false, k: 3, mode: "default" },
     });
 
-    expect(result.effective_message_classifications[0].volatility).toBe(
+    expect(result.effective_message_classifications[0]?.volatility).toBe(
       "VOLATILE",
     );
     expect(result.middle_hash).toBeNull();
@@ -190,8 +191,34 @@ describe("handlePreRequest", () => {
       pruner: { enabled: false, k: 3, mode: "default" },
     });
 
-    expect(result.effective_message_classifications[0].volatility).toBe("SEMI");
+    expect(result.effective_message_classifications[0]?.volatility).toBe("SEMI");
     expect(result.middle_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("fails open when message_classifications length mismatches messages", () => {
+    const original = baseRequest();
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = handlePreRequest({
+      db,
+      tracker: new CacheStateTracker(),
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      current_turn: 1,
+      original_request: original,
+      // original has 2 messages; supply only 1 classification
+      message_classifications: [cl("SEMI")],
+      block_placements: [],
+      pruner: { enabled: false, k: 3, mode: "default" },
+    });
+
+    expect(result.request).toBe(original);
+    expect(result.mutated).toBe(false);
+    expect(result.signals).toContain("error:fallback");
+    expect(spy).toHaveBeenCalledWith(
+      expect.stringContaining("mismatch"),
+      expect.any(Object),
+    );
   });
 
   it("fails open with the original request when storage fails", () => {

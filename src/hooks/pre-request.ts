@@ -78,6 +78,23 @@ function applyOneTurnSuffixWarming(
 
 export function handlePreRequest(input: PreRequestInput): PreRequestResult {
   try {
+    if (
+      !Array.isArray(input.message_classifications) ||
+      input.message_classifications.length !==
+        input.original_request.messages.length
+    ) {
+      console.error(
+        "[cachelane] pre-request: message_classifications length mismatch — failing open",
+        {
+          classifications: Array.isArray(input.message_classifications)
+            ? input.message_classifications.length
+            : typeof input.message_classifications,
+          messages: input.original_request.messages.length,
+        }
+      );
+      return fallbackResult(input);
+    }
+
     const pruneResult = pruneExpiredBlocks(input.db, {
       workspace_id: input.workspace_id,
       session_id: input.session_id,
@@ -114,7 +131,10 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       effective_message_classifications: effectiveClassifications,
     };
   } catch (err) {
-    console.error("[cachelane] pre-request error", err);
+    console.error(
+      "[cachelane] pre-request: pipeline error — failing open",
+      err instanceof Error ? err.message : String(err),
+    );
     return fallbackResult(input);
   }
 }

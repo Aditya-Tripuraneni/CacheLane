@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -78,10 +78,7 @@ describe("loadConfig", () => {
     );
   });
 
-  it("rejects version != 1 via Zod literal", () => {
-    // Older or non-numeric versions are caught by the Zod literal check;
-    // a newer version is caught by the explicit pre-check above. This test
-    // exercises the Zod path (version=0, still numeric, but not literal 1).
+  it("falls back to defaults when config fails Zod validation (version=0)", () => {
     const configPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(
       configPath,
@@ -99,7 +96,15 @@ describe("loadConfig", () => {
         log_level: "info",
       })
     );
-    expect(() => loadConfig(configPath)).toThrow(/config validation failed/i);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = loadConfig(configPath);
+    expect(config.pruner.k).toBe(3);
+    expect(config.version).toBe(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("failed validation"),
+      expect.any(String)
+    );
+    warnSpy.mockRestore();
   });
 
   it("falls back to defaults when config JSON is malformed", () => {
@@ -111,7 +116,7 @@ describe("loadConfig", () => {
     expect(config.pruner.k).toBe(3);
   });
 
-  it("rejects pruner.k outside range 1–10", () => {
+  it("falls back to defaults when pruner.k is out of range", () => {
     const configPath = path.join(tmpDir, "config.json");
     const invalid: CachelaneConfig = {
       version: 1,
@@ -128,6 +133,13 @@ describe("loadConfig", () => {
     };
     fs.writeFileSync(configPath, JSON.stringify(invalid));
 
-    expect(() => loadConfig(configPath)).toThrow(/config validation failed/i);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const config = loadConfig(configPath);
+    expect(config.pruner.k).toBe(3);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("failed validation"),
+      expect.any(String)
+    );
+    warnSpy.mockRestore();
   });
 });

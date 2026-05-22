@@ -30,9 +30,11 @@ export function mutateRequest(
 
   // Prefix breakpoint: marker on the last tool, or the last system block if no tools.
   if (out.tools && out.tools.length > 0) {
-    out.tools[out.tools.length - 1].cache_control = prefixMarker;
+    const lastTool = out.tools.at(-1);
+    if (lastTool) lastTool.cache_control = prefixMarker;
   } else if (out.system && out.system.length > 0) {
-    out.system[out.system.length - 1].cache_control = prefixMarker;
+    const lastSystem = out.system.at(-1);
+    if (lastSystem) lastSystem.cache_control = prefixMarker;
   }
 
   // Middle breakpoint: marker on the last content item of the last SEMI message.
@@ -44,8 +46,8 @@ export function mutateRequest(
     const lastSemiIdx = boundaries.middle_end_in_messages - 1;
     const msg = out.messages[lastSemiIdx];
     if (msg && msg.content.length > 0) {
-      const lastContent = msg.content[msg.content.length - 1];
-      lastContent.cache_control = MIDDLE_MARKER;
+      const lastContent = msg.content.at(-1);
+      if (lastContent) lastContent.cache_control = MIDDLE_MARKER;
     }
   }
 
