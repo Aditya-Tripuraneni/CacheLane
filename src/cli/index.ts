@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { loadConfig } from "../config/index.js";
 import { openDatabase } from "../storage/index.js";
@@ -290,7 +292,7 @@ export async function runCli(argv = process.argv, options: CliOptions = {}): Pro
   await createCachelaneCli(options).parseAsync(argv);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   runCli().catch((err) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;
