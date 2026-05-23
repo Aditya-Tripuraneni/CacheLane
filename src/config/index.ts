@@ -61,8 +61,11 @@ export function loadConfig(configPath: string): CachelaneConfig {
   try {
     return configSchema.parse(raw) as CachelaneConfig;
   } catch (err) {
-    throw new Error(
-      `Config validation failed at ${configPath}: ${err instanceof Error ? err.message : String(err)}`
+    if (!(err instanceof z.ZodError)) throw err;
+    console.warn(
+      `[cachelane] config at ${configPath} failed validation — falling back to defaults`,
+      err.message,
     );
+    return { ...DEFAULT_CONFIG };
   }
 }

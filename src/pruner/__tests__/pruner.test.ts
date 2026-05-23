@@ -3,9 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDatabase, type CachelaneDb } from "../../storage/index.js";
+import { formatStubText } from "../stubs.js";
 import {
   expandStub,
-  formatStubText,
   markExpandedBlockRestored,
   materializePrunedBlocks,
   pruneExpiredBlocks,
@@ -35,6 +35,7 @@ function insertBlock(
     is_stub: false,
     stub_summary: null,
     refetch_handle: "tool:read:src/auth.ts",
+    restored_at_turn: null,
     created_at: now,
     updated_at: now,
     ...overrides,
@@ -200,13 +201,13 @@ describe("materializePrunedBlocks", () => {
       "user",
       "assistant",
     ]);
-    expect(out.messages[0].content[0]).toEqual({ type: "text", text: "keep-0" });
-    expect(out.messages[0].content[1]).toEqual({
+    expect(out.messages[0]?.content[0]).toEqual({ type: "text", text: "keep-0" });
+    expect(out.messages[0]?.content[1]).toEqual({
       type: "text",
       text: "[stub:01KMATRL] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane:expand(block_id=01KMATRL)",
     });
-    expect(out.messages[1].content[0]).toEqual({ type: "text", text: "keep-1" });
-    expect(request.messages[0].content[1]).toEqual({
+    expect(out.messages[1]?.content[0]).toEqual({ type: "text", text: "keep-1" });
+    expect(request.messages[0]?.content[1]).toEqual({
       type: "text",
       text: "raw secret content",
     });

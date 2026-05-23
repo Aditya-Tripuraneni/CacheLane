@@ -6,7 +6,9 @@ export function findRegionBoundaries(
 ): RegionBoundaries {
   let middle_end: number | null = null;
   for (let i = 0; i < message_classifications.length; i++) {
-    const v = message_classifications[i].volatility;
+    const item = message_classifications[i];
+    if (item === undefined) break;
+    const v = item.volatility;
     if (v === "SEMI" || v === "STABLE") {
       middle_end = i + 1;
     } else {

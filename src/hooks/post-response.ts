@@ -44,18 +44,10 @@ export function handlePostResponse(input: PostResponseInput): PostResponseResult
 
     return { referenced_ids, signals: ["ok"] };
   } catch (err) {
-    console.error("[cachelane] post-response reference detection error", err);
-    try {
-      input.db.updateBlockCounters({
-        workspace_id: input.workspace_id,
-        session_id: input.session_id,
-        turn_number: input.turn_number,
-        referenced_ids: new Set(),
-        updated_at: now,
-      });
-    } catch (storageErr) {
-      console.error("[cachelane] post-response counter update error", storageErr);
-    }
+    console.error(
+      "[cachelane] post-response: reference detection error — failing open",
+      err instanceof Error ? err.message : String(err),
+    );
     return { referenced_ids: new Set(), signals: ["error:fallback"] };
   }
 }

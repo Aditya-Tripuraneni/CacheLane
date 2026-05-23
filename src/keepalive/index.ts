@@ -10,6 +10,7 @@ export type KeepaliveSkipReason =
   | "policy_off"
   | "not_idle"
   | "ttl_fresh"
+  | "already_expired"
   | "adaptive_1h"
   | "in_flight";
 
@@ -55,6 +56,8 @@ export interface KeepaliveWorkerOptions {
   executor: KeepalivePingExecutor;
   logger?: KeepaliveLogger;
   now_ms?: () => number;
+  /** Max ms to wait for a single ping before treating it as failed. Default 5000. */
+  ping_timeout_ms?: number;
 }
 
 export function decideKeepalive(
@@ -85,6 +88,9 @@ export function decideKeepalive(
   }
 
   const timeUntilExpiryMs = state.expected_expiry_ms - context.now_ms;
+  if (timeUntilExpiryMs <= 0) {
+    return { action: "skip", reason: "already_expired" };
+  }
   if (timeUntilExpiryMs > context.config.interval_seconds * 1000) {
     return { action: "skip", reason: "ttl_fresh" };
   }
@@ -113,6 +119,7 @@ export class KeepaliveWorker {
   private readonly executor: KeepalivePingExecutor;
   private readonly logger: KeepaliveLogger;
   private readonly nowMs: () => number;
+  private readonly pingTimeoutMs: number;
   private readonly inFlight = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
 
@@ -122,6 +129,21 @@ export class KeepaliveWorker {
     this.executor = options.executor;
     this.logger = options.logger ?? console;
     this.nowMs = options.now_ms ?? Date.now;
+    this.pingTimeoutMs = options.ping_timeout_ms ?? 5_000;
+  }
+
+  private executorWithTimeout(
+    request: KeepalivePingRequest,
+  ): Promise<KeepalivePingResult> {
+    return Promise.race([
+      Promise.resolve(this.executor(request)),
+      new Promise<KeepalivePingResult>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("keepalive ping timed out")),
+          this.pingTimeoutMs,
+        ),
+      ),
+    ]);
   }
 
   start(): void {
@@ -145,6 +167,15 @@ export class KeepaliveWorker {
   async tick(nowMs = this.nowMs()): Promise<KeepaliveTickResult> {
     const result: KeepaliveTickResult = { pinged: 0, skipped: 0, failed: 0 };
 
+    // Collect all sessions that need a ping this tick (decision phase).
+    // Mark them all in-flight before dispatching so a concurrent tick sees them.
+    const targets: Array<{
+      key: string;
+      workspace_id: string;
+      session_id: string;
+      request: KeepalivePingRequest;
+    }> = [];
+
     for (const entry of this.tracker.entries()) {
       const key = `${entry.workspace_id}:${entry.session_id}`;
       const decision = decideKeepalive(entry.state, {
@@ -161,36 +192,45 @@ export class KeepaliveWorker {
       }
 
       this.inFlight.add(key);
-      try {
-        const ping = await this.executor(decision.request);
-        if (ping.ok) {
-          const latestState = this.tracker.get(
-            entry.workspace_id,
-            entry.session_id,
-          );
-          if (
-            latestState?.prefix_hash === decision.request.prefix_hash &&
-            latestState.middle_hash === decision.request.middle_hash &&
-            latestState.ttl_class === decision.request.ttl_class
-          ) {
-            this.tracker.update(entry.workspace_id, entry.session_id, {
-              ...latestState,
-              last_read_at_ms: nowMs,
-              expected_expiry_ms: nextExpiry(nowMs, latestState.ttl_class),
-            });
-          }
-          result.pinged += 1;
-        } else {
-          result.failed += 1;
-          this.logger.info("[cachelane] keepalive ping failed", ping.error);
-        }
-      } catch (err) {
-        result.failed += 1;
-        this.logger.info("[cachelane] keepalive ping failed", err);
-      } finally {
-        this.inFlight.delete(key);
-      }
+      targets.push({
+        key,
+        workspace_id: entry.workspace_id,
+        session_id: entry.session_id,
+        request: decision.request,
+      });
     }
+
+    // Dispatch all pings in parallel with per-ping timeout.
+    await Promise.all(
+      targets.map(async ({ key, workspace_id, session_id, request }) => {
+        try {
+          const ping = await this.executorWithTimeout(request);
+          if (ping.ok) {
+            const latestState = this.tracker.get(workspace_id, session_id);
+            if (
+              latestState?.prefix_hash === request.prefix_hash &&
+              latestState.middle_hash === request.middle_hash &&
+              latestState.ttl_class === request.ttl_class
+            ) {
+              this.tracker.update(workspace_id, session_id, {
+                ...latestState,
+                last_read_at_ms: nowMs,
+                expected_expiry_ms: nextExpiry(nowMs, latestState.ttl_class),
+              });
+            }
+            result.pinged += 1;
+          } else {
+            result.failed += 1;
+            this.logger.info("[cachelane] keepalive ping failed", ping.error);
+          }
+        } catch (err) {
+          result.failed += 1;
+          this.logger.info("[cachelane] keepalive ping failed", err);
+        } finally {
+          this.inFlight.delete(key);
+        }
+      }),
+    );
 
     return result;
   }

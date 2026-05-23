@@ -136,7 +136,19 @@ export function detectDetailedReferences(turn: ReferenceTurn): DetectedReference
     }
   }
 
-  return [...detected.values()];
+  const refs = [...detected.values()];
+
+  if (refs.length > 0) {
+    const byType = { tool_call: 0, id_mention: 0, text_quote: 0 };
+    for (const ref of refs) byType[ref.reference_type] += 1;
+    console.info("[cachelane] reference detector", {
+      detected: refs.length,
+      of: turn.blocks_in_prompt.length,
+      by_type: byType,
+    });
+  }
+
+  return refs;
 }
 
 export function detectReferences(turn: ReferenceTurn): Set<string> {

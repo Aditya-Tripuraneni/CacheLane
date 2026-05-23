@@ -88,18 +88,30 @@ export function orchestrate(
       mutated.tools?.at(-1)?.cache_control !== undefined ||
       mutated.system?.at(-1)?.cache_control !== undefined;
 
+    const signals: MutatedRequest["signals"] = breakpoints.include_middle_breakpoint
+      ? ["prefix_cached", "middle_cached"]
+      : ["prefix_cached"];
+
+    console.info("[cachelane] orchestrate", {
+      prefix_changed: prevState?.prefix_hash !== breakpoints.prefix_hash,
+      ttl_class: ttlClass,
+      signals,
+      mutated: didMutate,
+    });
+
     return {
       request: mutated,
       mutated: didMutate,
       prefix_hash: breakpoints.prefix_hash,
       middle_hash: breakpoints.middle_hash,
-      signals: breakpoints.include_middle_breakpoint
-        ? ["prefix_cached", "middle_cached"]
-        : ["prefix_cached"],
+      signals,
     };
   } catch (err) {
     // Fail-open: never let an orchestration error block the model call.
-    console.error("[cachelane] orchestrate error", err);
+    console.error(
+      "[cachelane] orchestrate: error — failing open",
+      err instanceof Error ? err.message : String(err),
+    );
     return {
       request: input.original_request,
       mutated: false,

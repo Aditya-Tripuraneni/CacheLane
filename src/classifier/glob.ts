@@ -7,6 +7,7 @@ function patternToRegExp(pattern: string): RegExp {
   let i = 0;
   while (i < pattern.length) {
     const ch = pattern[i];
+    if (ch === undefined) break;
     if (ch === "*" && pattern[i + 1] === "*") {
       if (pattern[i + 2] === "/") {
         // `**/` matches zero or more path segments, preserving the segment

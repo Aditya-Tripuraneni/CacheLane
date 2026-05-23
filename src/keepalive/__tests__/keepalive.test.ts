@@ -150,6 +150,31 @@ describe("KeepaliveWorker", () => {
     expect(tracker.get("ws-1", "s-1")?.expected_expiry_ms).toBe(300_000);
   });
 
+  it("treats a hung executor as a failed ping when ping_timeout_ms elapses", async () => {
+    vi.useFakeTimers();
+    const tracker = new CacheStateTracker();
+    tracker.update("ws-1", "s-1", state());
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const worker = new KeepaliveWorker({
+      tracker,
+      config: { ...config, policy: "static" },
+      executor: () => new Promise(() => { /* never resolves */ }),
+      logger,
+      ping_timeout_ms: 1_000,
+    });
+
+    const tickPromise = worker.tick(260_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    const result = await tickPromise;
+
+    expect(result).toEqual({ pinged: 0, skipped: 0, failed: 1 });
+    expect(logger.info).toHaveBeenCalledWith(
+      "[cachelane] keepalive ping failed",
+      expect.objectContaining({ message: "keepalive ping timed out" }),
+    );
+    vi.useRealTimers();
+  });
+
   it("does not overlap pings for the same session", async () => {
     const tracker = new CacheStateTracker();
     tracker.update("ws-1", "s-1", state());
