@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   cachelaneConfigPath,
   cachelaneDbPath,
   cachelaneHome,
+  claudeHome,
   claudeHookPath,
   claudeMcpPath,
 } from "./paths.js";
@@ -50,22 +52,109 @@ function stable(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function claudeSettingsPath(env: NodeJS.ProcessEnv): string {
+  return path.join(claudeHome(env), "settings.json");
+}
+
+// Merge CacheLane hooks into ~/.claude/settings.json.
+// Claude Code reads hooks from settings.json, not from ~/.claude/hooks/*.json.
+function mergeHooksIntoSettings(
+  settingsPath: string,
+  hookCmd: (name: string) => string,
+): boolean {
+  const settings = readJsonObject(settingsPath);
+  const hooks: JsonObject = isObject(settings.hooks) ? { ...(settings.hooks as JsonObject) } : {};
+
+  const entries = [
+    { event: "UserPromptSubmit", name: "user-prompt-submit" },
+    { event: "Stop", name: "stop" },
+  ] as const;
+
+  let changed = false;
+
+  for (const { event, name } of entries) {
+    const cmd = hookCmd(name);
+    const existing: unknown[] = Array.isArray(hooks[event]) ? [...(hooks[event] as unknown[])] : [];
+
+    // Remove stale cachelane entries (command path may have changed after rebuild).
+    // Detect by suffix: our commands always end with `hook <name>`.
+    const filtered = existing.filter((g: unknown) => {
+      if (!isObject(g) || !Array.isArray((g as JsonObject).hooks)) return true;
+      return !((g as JsonObject).hooks as unknown[]).some(
+        (h) => isObject(h) && typeof (h as JsonObject).command === "string" &&
+          ((h as JsonObject).command as string).endsWith(` hook ${name}`),
+      );
+    });
+
+    filtered.push({ hooks: [{ type: "command", command: cmd }] });
+
+    if (stable(filtered) !== stable(existing)) {
+      hooks[event] = filtered;
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    settings.hooks = hooks;
+    writeJsonObject(settingsPath, settings);
+  }
+
+  return changed;
+}
+
+function removeHooksFromSettings(settingsPath: string): boolean {
+  if (!fs.existsSync(settingsPath)) return false;
+
+  const settings = readJsonObject(settingsPath);
+  if (!isObject(settings.hooks)) return false;
+
+  const hooks: JsonObject = { ...(settings.hooks as JsonObject) };
+  const OUR_HOOK_NAMES = ["user-prompt-submit", "stop"];
+  let changed = false;
+
+  for (const event of ["UserPromptSubmit", "Stop"]) {
+    if (!Array.isArray(hooks[event])) continue;
+
+    const filtered = (hooks[event] as unknown[]).filter((g: unknown) => {
+      if (!isObject(g) || !Array.isArray((g as JsonObject).hooks)) return true;
+      return !((g as JsonObject).hooks as unknown[]).some(
+        (h) => isObject(h) && typeof (h as JsonObject).command === "string" &&
+          OUR_HOOK_NAMES.some((n) => ((h as JsonObject).command as string).endsWith(` hook ${n}`)),
+      );
+    });
+
+    if (filtered.length !== (hooks[event] as unknown[]).length) {
+      if (filtered.length === 0) {
+        delete hooks[event];
+      } else {
+        hooks[event] = filtered;
+      }
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    settings.hooks = hooks;
+    writeJsonObject(settingsPath, settings);
+  }
+
+  return changed;
+}
+
 export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallResult {
   const configPath = cachelaneConfigPath(env);
   loadConfig(configPath);
 
   const mcpPath = claudeMcpPath(env);
   const hookPath = claudeHookPath(env);
+
+  // ── MCP server ──────────────────────────────────────────────────────────────
   const mcpConfig = readJsonObject(mcpPath);
-  const servers = isObject(mcpConfig.mcpServers)
-    ? mcpConfig.mcpServers
-    : {};
+  const servers = isObject(mcpConfig.mcpServers) ? mcpConfig.mcpServers : {};
   const nextServer = {
     command: "cachelane",
     args: ["mcp"],
-    env: {
-      CACHELANE_HOME: cachelaneHome(env),
-    },
+    env: { CACHELANE_HOME: cachelaneHome(env) },
   };
   const beforeMcp = stable(mcpConfig);
   servers.cachelane = nextServer;
@@ -75,26 +164,36 @@ export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallR
     writeJsonObject(mcpPath, mcpConfig);
   }
 
-  const hookConfig = {
-    name: "cachelane",
-    hooks: {
-      PreRequest: [{ command: "cachelane hook pre-request" }],
-      PostResponse: [{ command: "cachelane hook post-response" }],
-    },
-  };
-  const beforeHook = fs.existsSync(hookPath)
-    ? fs.readFileSync(hookPath, "utf-8")
-    : "";
-  const afterHook = `${JSON.stringify(hookConfig, null, 2)}\n`;
-  if (beforeHook !== afterHook) {
+  // ── Hooks ────────────────────────────────────────────────────────────────────
+  // Claude Code hooks only fire from ~/.claude/settings.json, not from
+  // ~/.claude/hooks/*.json. We merge our entries into settings.json and also
+  // write a marker file at hookPath so `cachelane doctor` can detect them.
+  //
+  // Use absolute paths for node + script because hook subprocesses don't inherit
+  // the user's shell PATH (e.g. fnm multishell paths are session-specific).
+  const nodeExec = (() => { try { return fs.realpathSync(process.execPath); } catch { return process.execPath; } })();
+  const cliScript = fileURLToPath(new URL("./index.js", import.meta.url));
+  const hookCmd = (name: string) => `"${nodeExec}" "${cliScript}" hook ${name}`;
+
+  const settingsPath = claudeSettingsPath(env);
+  const settingsChanged = mergeHooksIntoSettings(settingsPath, hookCmd);
+
+  // Marker file — used by `cachelane doctor` to confirm hooks are registered
+  const markerContent = JSON.stringify(
+    { hooks: { UserPromptSubmit: ["user-prompt-submit"], Stop: ["stop"] } },
+    null,
+    2,
+  ) + "\n";
+  const beforeMarker = fs.existsSync(hookPath) ? fs.readFileSync(hookPath, "utf-8") : "";
+  if (beforeMarker !== markerContent) {
     fs.mkdirSync(path.dirname(hookPath), { recursive: true });
-    fs.writeFileSync(hookPath, afterHook);
+    fs.writeFileSync(hookPath, markerContent);
   }
 
   return {
     mcp_path: mcpPath,
     hook_path: hookPath,
-    changed: beforeMcp !== afterMcp || beforeHook !== afterHook,
+    changed: beforeMcp !== afterMcp || settingsChanged || beforeMarker !== markerContent,
   };
 }
 
@@ -115,6 +214,12 @@ export function uninstallCachelane(
     }
   }
 
+  // Remove from settings.json (where hooks actually fire)
+  if (removeHooksFromSettings(claudeSettingsPath(env))) {
+    changed = true;
+  }
+
+  // Remove marker file
   if (fs.existsSync(hookPath)) {
     fs.rmSync(hookPath, { force: true });
     changed = true;
@@ -128,12 +233,7 @@ export function uninstallCachelane(
     }
   }
 
-  return {
-    mcp_path: mcpPath,
-    hook_path: hookPath,
-    purge,
-    changed,
-  };
+  return { mcp_path: mcpPath, hook_path: hookPath, purge, changed };
 }
 
 export function installSurfaceStatus(env: NodeJS.ProcessEnv = process.env): {

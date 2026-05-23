@@ -1,5 +1,6 @@
 import type {
   CachelaneStats,
+  SessionSummaryRow,
   TurnExplanationRecord,
 } from "../storage/index.js";
 
@@ -36,6 +37,23 @@ export function formatExplanation(
     `Messages: ${explanation.region_metadata.message_count}`,
     `Signals: ${explanation.signals.join(", ") || "none"}`,
   ].join("\n");
+}
+
+export function formatSessions(rows: SessionSummaryRow[]): string {
+  if (rows.length === 0) return "No sessions recorded.";
+  const lines = [
+    `${"SESSION ID".padEnd(38)}  ${"TURNS".padStart(5)}  ${"HIT".padStart(6)}  ${"SAVINGS".padStart(7)}  LAST ACTIVE`,
+    "-".repeat(80),
+  ];
+  for (const r of rows) {
+    const date = new Date(r.last_active_ms).toLocaleString("en-US", {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    lines.push(
+      `${r.session_id.padEnd(38)}  ${String(r.turns).padStart(5)}  ${(r.cache_hit_ratio * 100).toFixed(1).padStart(5)}%  ${(r.savings_ratio * 100).toFixed(1).padStart(6)}%  ${date}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 export function jsonLine(value: unknown): string {

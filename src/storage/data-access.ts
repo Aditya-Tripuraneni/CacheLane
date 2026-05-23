@@ -585,5 +585,41 @@ export function openDatabase(dbPath: string): CachelaneDb {
     };
   };
 
+  db.listSessions = (workspaceId?: string) => {
+    const sql = workspaceId
+      ? `SELECT workspace_id, session_id,
+               COUNT(*) AS turns,
+               COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
+               COALESCE(SUM(input_tokens + cache_creation_5m_tokens + cache_creation_1h_tokens + cache_read_tokens), 0) AS baseline,
+               COALESCE(SUM(effective_cost_units), 0) AS effective,
+               MAX(created_at) AS last_active_ms
+         FROM turns WHERE workspace_id = ?
+         GROUP BY workspace_id, session_id
+         ORDER BY last_active_ms DESC`
+      : `SELECT workspace_id, session_id,
+               COUNT(*) AS turns,
+               COALESCE(SUM(cache_read_tokens), 0) AS cache_read,
+               COALESCE(SUM(input_tokens + cache_creation_5m_tokens + cache_creation_1h_tokens + cache_read_tokens), 0) AS baseline,
+               COALESCE(SUM(effective_cost_units), 0) AS effective,
+               MAX(created_at) AS last_active_ms
+         FROM turns
+         GROUP BY workspace_id, session_id
+         ORDER BY last_active_ms DESC`;
+    const rows = workspaceId
+      ? rawDb.prepare(sql).all(workspaceId)
+      : rawDb.prepare(sql).all();
+    return (rows as Array<{
+      workspace_id: string; session_id: string; turns: number;
+      cache_read: number; baseline: number; effective: number; last_active_ms: number;
+    }>).map((r) => ({
+      workspace_id: r.workspace_id,
+      session_id: r.session_id,
+      turns: r.turns,
+      cache_hit_ratio: r.baseline === 0 ? 0 : r.cache_read / r.baseline,
+      savings_ratio: r.baseline === 0 ? 0 : (r.baseline - r.effective) / r.baseline,
+      last_active_ms: r.last_active_ms,
+    }));
+  };
+
   return db;
 }

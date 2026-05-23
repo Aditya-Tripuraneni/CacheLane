@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-import path from "node:path";
+import fs from "node:fs";
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { loadConfig } from "../config/index.js";
-import { openDatabase } from "../storage/index.js";
+import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
 import {
   addExcludePattern,
@@ -14,7 +15,7 @@ import {
   setTelemetryOptIn,
 } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
-import { formatExplanation, formatStats, jsonLine } from "./format.js";
+import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
 import {
   cachelaneConfigPath,
@@ -96,6 +97,122 @@ async function readStdin(): Promise<string> {
     process.stdin.on("end", () => resolve(buffer));
     process.stdin.on("error", reject);
   });
+}
+
+interface TranscriptApiCall {
+  id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_5m_tokens: number;
+  cache_creation_1h_tokens: number;
+  cache_read_tokens: number;
+  created_at: number;
+}
+
+function parseTranscriptApiCalls(content: string): TranscriptApiCall[] {
+  const calls: TranscriptApiCall[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = JSON.parse(trimmed) as Record<string, unknown>;
+      const msg = entry.message as Record<string, unknown> | undefined;
+      if (!msg || msg.role !== "assistant" || !msg.id || !msg.usage) continue;
+
+      const u = msg.usage as Record<string, number | Record<string, number> | undefined>;
+      const num = (v: number | undefined) => (typeof v === "number" ? v : 0);
+
+      calls.push({
+        id: msg.id as string,
+        model: (msg.model as string) ?? "",
+        input_tokens: num(u.input_tokens as number | undefined),
+        output_tokens: num(u.output_tokens as number | undefined),
+        cache_creation_5m_tokens: num(
+          (u.ephemeral_5m_input_tokens ??
+            u.cache_creation_5m_tokens ??
+            u.cache_creation_input_tokens) as number | undefined,
+        ),
+        cache_creation_1h_tokens: num(
+          (u.ephemeral_1h_input_tokens ?? u.cache_creation_1h_tokens) as number | undefined,
+        ),
+        cache_read_tokens: num(
+          (u.cache_read_input_tokens ?? u.cache_read_tokens) as number | undefined,
+        ),
+        created_at: typeof entry.timestamp === "number" ? (entry.timestamp as number) : Date.now(),
+      });
+    } catch {
+      // Skip malformed lines
+    }
+  }
+  return calls;
+}
+
+async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, unknown>): Promise<void> {
+  try {
+    const sessionId =
+      (typeof parsed.session_id === "string" ? parsed.session_id : undefined) ??
+      (typeof parsed.sessionId === "string" ? parsed.sessionId : undefined) ??
+      env.CACHELANE_SESSION_ID ??
+      "default";
+    const workspaceId = env.CACHELANE_WORKSPACE_ID ?? "default";
+
+    const transcriptPath =
+      typeof parsed.transcript_path === "string" ? parsed.transcript_path : null;
+    if (!transcriptPath) return;
+
+    let content: string;
+    try {
+      content = fs.readFileSync(transcriptPath, "utf-8");
+    } catch {
+      return;
+    }
+
+    const calls = parseTranscriptApiCalls(content);
+    if (calls.length === 0) return;
+
+    const db = openDatabase(cachelaneDbPath(env));
+    try {
+      const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
+      let nextTurn = stats.turns + 1;
+
+      for (const call of calls) {
+        const effective = calculateEffectiveCostUnits({
+          input_tokens: call.input_tokens,
+          cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+          cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+          cache_read_tokens: call.cache_read_tokens,
+        });
+        try {
+          db.insertTurn({
+            id: call.id,
+            workspace_id: workspaceId,
+            session_id: sessionId,
+            turn_number: nextTurn,
+            model: call.model,
+            input_tokens: call.input_tokens,
+            output_tokens: call.output_tokens,
+            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+            effective_cost_units: effective,
+            prefix_breakpoint_hash: null,
+            middle_breakpoint_hash: null,
+            pruned_blocks_count: 0,
+            keepalive_pings_since_last_turn: 0,
+            created_at: call.created_at,
+          });
+          nextTurn++;
+        } catch {
+          // Already recorded (UNIQUE constraint on id)
+        }
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    process.stderr.write(`[cachelane] hook error: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 export function createCachelaneCli(options: CliOptions = {}): Command {
@@ -188,6 +305,22 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     });
 
   program
+    .command("sessions")
+    .description("List all recorded sessions with cache stats")
+    .option("--workspace-id <id>", "Filter by workspace")
+    .option("--db <path>", "SQLite database path")
+    .option("--json", "Print stable JSON")
+    .action((cmd: JsonCommandOptions & { workspaceId?: string; db?: string }) => {
+      const db = openDatabase(cmd.db ?? cachelaneDbPath(env));
+      try {
+        const rows = db.listSessions(cmd.workspaceId);
+        io.stdout(cmd.json ? jsonLine(rows) : `${formatSessions(rows)}\n`);
+      } finally {
+        db.close();
+      }
+    });
+
+  program
     .command("prune")
     .description("Set K-pruner mode")
     .option("--aggressive", "K=2")
@@ -270,12 +403,18 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
   program
     .command("hook")
     .description("Claude Code hook entrypoints")
-    .argument("<name>", "pre-request or post-response")
-    .action(async () => {
+    .argument("<name>", "hook event name (user-prompt-submit or stop)")
+    .action(async (name: string) => {
       const input = await readStdin();
       if (input.trim().length === 0) return;
-      JSON.parse(input);
-      io.stdout(input.endsWith("\n") ? input : `${input}\n`);
+      try {
+        const parsed = JSON.parse(input) as Record<string, unknown>;
+        if (name === "user-prompt-submit" || name === "stop") {
+          await handleHookEvent(env, parsed);
+        }
+      } catch {
+        // Fail open — don't crash Claude Code
+      }
     });
 
   program
@@ -292,7 +431,8 @@ export async function runCli(argv = process.argv, options: CliOptions = {}): Pro
   await createCachelaneCli(options).parseAsync(argv);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+const _argv1 = process.argv[1] ? (() => { try { return realpathSync(process.argv[1]); } catch { return process.argv[1]; } })() : "";
+if (_argv1 && fileURLToPath(import.meta.url) === _argv1) {
   runCli().catch((err) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;

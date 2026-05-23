@@ -259,11 +259,11 @@ describe("cachelane CLI", () => {
 
     await run(["install"]);
     const hook = JSON.parse(fs.readFileSync(hookPath, "utf-8")) as {
-      hooks: { PreRequest: unknown[]; PostResponse: unknown[] };
+      hooks: { UserPromptSubmit: unknown[]; Stop: unknown[] };
     };
 
-    expect(hook.hooks.PreRequest).toHaveLength(1);
-    expect(hook.hooks.PostResponse).toHaveLength(1);
+    expect(hook.hooks.UserPromptSubmit).toHaveLength(1);
+    expect(hook.hooks.Stop).toHaveLength(1);
   });
 
   it("keepalive rejects invalid policies", async () => {

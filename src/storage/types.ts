@@ -136,7 +136,17 @@ export interface UpdateBlockCountersParams {
   updated_at: number;
 }
 
+export interface SessionSummaryRow {
+  workspace_id: string;
+  session_id: string;
+  turns: number;
+  cache_hit_ratio: number;
+  savings_ratio: number;
+  last_active_ms: number;
+}
+
 export interface CachelaneDb extends Database.Database {
+  listSessions(workspaceId?: string): SessionSummaryRow[];
   insertBlock(params: InsertBlockParams): void;
   getBlock(id: string): BlockRow | null;
   getPrunableBlocks(params: GetPrunableBlocksParams): BlockRow[];

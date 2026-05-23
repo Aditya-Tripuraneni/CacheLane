@@ -20,6 +20,7 @@ export type {
   StatsScope,
   GetStatsParams,
   CachelaneStats,
+  SessionSummaryRow,
   GetTurnExplanationParams,
   GetRecentTurnParams,
   UpdateTurnUsageParams,
