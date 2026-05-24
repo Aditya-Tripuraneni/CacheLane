@@ -17,7 +17,9 @@
 - Create: `src/proxy/__tests__/session-router.test.ts`
 
 ## Investigation findings
-- (pending)
+- Claude Code natively appends tracing headers to all outgoing requests, including `X-Claude-Code-Session-Id` and `X-Claude-Code-Agent-Id`.
+- This fundamentally simplifies the session routing. We do not need complex content-hashing (Option D) or dynamic proxy ports (Option E).
+- The shared proxy on port 7332 will simply extract the `x-claude-code-session-id` header from the incoming request and use it as the `session_id`.
 
 ## Status log
-- (blocked on G5)
+- (done) Native header discovery implemented and tested in `server.ts` and `server.test.ts`. Gate 6 complete!

@@ -187,7 +187,6 @@ export function createProxyServer(
   tracker: CacheStateTracker,
 ): http.Server {
   const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
-  const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
   const upstream: UpstreamTarget = {
     host: opts.upstream?.host ?? DEFAULT_UPSTREAM_HOST,
     port: opts.upstream?.port ?? DEFAULT_UPSTREAM_PORT,
@@ -224,6 +223,12 @@ export function createProxyServer(
         forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
         return;
       }
+
+      const requestHeaders = headersFromIncoming(req);
+      const sessionIdHeader = requestHeaders["x-claude-code-session-id"];
+      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0 
+        ? sessionIdHeader 
+        : (opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID());
 
       let currentTurn = 0;
       const turnId = randomUUID();

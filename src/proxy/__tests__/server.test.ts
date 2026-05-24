@@ -530,6 +530,35 @@ describe("proxy pipeline integration", () => {
         expect(hasCacheControl).toBe(true);
       }
     });
+
+    it("isolates sequential requests into separate sessions using x-claude-code-session-id header", async () => {
+      // Turn 1 for session A
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-A" });
+      await waitForTurn(dbPath, "session-A", 1);
+
+      // Turn 1 for session B
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-B" });
+      await waitForTurn(dbPath, "session-B", 1);
+
+      // Turn 2 for session A
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-A" });
+      await waitForTurn(dbPath, "session-A", 2);
+
+      const db = openDatabase(dbPath);
+      try {
+        const statsA = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "session-A" });
+        expect(statsA.turns).toBe(2);
+
+        const statsB = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "session-B" });
+        expect(statsB.turns).toBe(1);
+
+        // Fallback session shouldn't have any turns
+        const statsFallback = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "test-session" });
+        expect(statsFallback.turns).toBe(0);
+      } finally {
+        db.close();
+      }
+    });
   });
 
   describe("effective cost computation", () => {
