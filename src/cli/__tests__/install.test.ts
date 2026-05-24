@@ -103,6 +103,15 @@ describe("validateInstall", () => {
     expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(/Invalid JSON/);
   });
 
+  it("aborts when settings.json has a malformed env (non-object)", () => {
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({ env: "oops" }));
+
+    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(
+      /env.*not an object/i,
+    );
+  });
+
   it("does not modify settings.json on validation failure", () => {
     writeSettings({ env: { ANTHROPIC_BASE_URL: "http://example.com:9999" } });
     const before = fs.readFileSync(settingsPath, "utf-8");

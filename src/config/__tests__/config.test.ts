@@ -33,7 +33,7 @@ describe("loadConfig", () => {
     expect(config.classification.exclude).toEqual([]);
     expect(config.telemetry.opt_in).toBe(false);
     expect(config.telemetry.endpoint).toBe("");
-    expect(config.log_level).toBe("info");
+    expect(config.logging.level).toBe("info");
     expect(fs.existsSync(configPath)).toBe(true);
   });
 
@@ -54,7 +54,7 @@ describe("loadConfig", () => {
         sliding_window_turns: 6,
       },
       telemetry: { opt_in: false, endpoint: "" },
-      log_level: "debug",
+      logging: { level: "debug", max_file_bytes: 10_485_760, max_files: 5 },
     };
     fs.writeFileSync(configPath, JSON.stringify(custom));
 
@@ -63,7 +63,7 @@ describe("loadConfig", () => {
     expect(config.pruner.mode).toBe("conservative");
     expect(config.classification.pin).toEqual(["src/**/*.ts"]);
     expect(config.classification.exclude).toEqual(["**/node_modules/**"]);
-    expect(config.log_level).toBe("debug");
+    expect(config.logging.level).toBe("debug");
   });
 
   it("throws when config schema version is newer than supported", () => {
@@ -93,7 +93,6 @@ describe("loadConfig", () => {
         },
         classification: { pin: [], exclude: [], sliding_window_turns: 4 },
         telemetry: { opt_in: false, endpoint: "" },
-        log_level: "info",
       })
     );
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -129,7 +128,6 @@ describe("loadConfig", () => {
       },
       classification: { pin: [], exclude: [], sliding_window_turns: 4 },
       telemetry: { opt_in: false, endpoint: "" },
-      log_level: "info",
     };
     fs.writeFileSync(configPath, JSON.stringify(invalid));
 

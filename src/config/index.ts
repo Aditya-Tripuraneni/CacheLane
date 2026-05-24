@@ -28,7 +28,6 @@ const configSchema = z.object({
     opt_in: z.boolean(),
     endpoint: z.string().default(""),
   }),
-  log_level: z.enum(["trace", "debug", "info", "warn", "error"]),
   proxy: z
     .object({
       port: z.number().int().positive(),

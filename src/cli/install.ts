@@ -30,6 +30,20 @@ function isObject(value: unknown): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// Guard against a malformed `env` field in settings.json. Throws if `env`
+// exists but is not a plain object; returns silently otherwise. Both
+// validateInstall and mergeBaseUrlIntoSettings call this so neither silently
+// clobbers a malformed user config.
+function assertEnvIsObjectOrAbsent(settings: JsonObject, settingsPath: string): void {
+  if (!("env" in settings) || settings.env === undefined) return;
+  if (isObject(settings.env)) return;
+  const actualType = Array.isArray(settings.env) ? "array" : typeof settings.env;
+  throw new Error(
+    `Cannot install: ${settingsPath} has an "env" key that is not an object (got ${actualType}). ` +
+      `Fix or remove the malformed "env" field before installing.`,
+  );
+}
+
 function readJsonObject(filePath: string): JsonObject {
   if (!fs.existsSync(filePath)) return {};
   let parsed: unknown;
@@ -65,6 +79,7 @@ function baseUrlFor(port: number): string {
 // existing readJsonObject error path for malformed JSON.
 export function validateInstall(settingsPath: string, intendedPort: number): void {
   const settings = readJsonObject(settingsPath);
+  assertEnvIsObjectOrAbsent(settings, settingsPath);
   if (!isObject(settings.env)) return;
   const existing = (settings.env as JsonObject).ANTHROPIC_BASE_URL;
   if (typeof existing !== "string") return;
@@ -80,6 +95,7 @@ export function validateInstall(settingsPath: string, intendedPort: number): voi
 // Idempotent merge — returns true iff the file was modified.
 export function mergeBaseUrlIntoSettings(settingsPath: string, port: number): boolean {
   const settings = readJsonObject(settingsPath);
+  assertEnvIsObjectOrAbsent(settings, settingsPath);
   const env: JsonObject = isObject(settings.env) ? { ...(settings.env as JsonObject) } : {};
   const intended = baseUrlFor(port);
   if (env.ANTHROPIC_BASE_URL === intended) return false;

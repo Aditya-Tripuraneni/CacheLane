@@ -70,7 +70,6 @@ export interface CachelaneConfig {
     opt_in: boolean;
     endpoint: string;
   };
-  log_level: "trace" | "debug" | "info" | "warn" | "error";
   proxy: {
     port: number;
     host: string;

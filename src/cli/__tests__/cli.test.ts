@@ -95,7 +95,6 @@ describe("cachelane CLI", () => {
             custom: "preserved",
           },
           telemetry: { opt_in: false, endpoint: "" },
-          log_level: "info",
           top_level_custom: true,
         },
         null,

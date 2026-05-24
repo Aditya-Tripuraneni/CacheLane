@@ -24,7 +24,6 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     opt_in: false,
     endpoint: "",
   },
-  log_level: "info",
   proxy: {
     port: 7332,
     host: "127.0.0.1",
