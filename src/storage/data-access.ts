@@ -22,6 +22,7 @@ import type {
   GetStatsParams,
   CachelaneStats,
   GetTurnExplanationParams,
+  GetRecentTurnExplanationsParams,
   GetRecentTurnParams,
   UpdateTurnUsageParams,
 } from "./types.js";
@@ -259,13 +260,13 @@ export function openDatabase(dbPath: string): CachelaneDb {
        input_tokens, output_tokens,
        cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens,
        effective_cost_units, prefix_breakpoint_hash, middle_breakpoint_hash,
-       pruned_blocks_count, keepalive_pings_since_last_turn, created_at)
+       pruned_blocks_count, keepalive_pings_since_last_turn, signals, request_mutated, created_at)
     VALUES
       (@id, @workspace_id, @session_id, @turn_number, @model,
        @input_tokens, @output_tokens,
        @cache_creation_5m_tokens, @cache_creation_1h_tokens, @cache_read_tokens,
        @effective_cost_units, @prefix_breakpoint_hash, @middle_breakpoint_hash,
-       @pruned_blocks_count, @keepalive_pings_since_last_turn, @created_at)
+       @pruned_blocks_count, @keepalive_pings_since_last_turn, @signals, @request_mutated, @created_at)
   `);
 
   const getTurnStmt = rawDb.prepare("SELECT * FROM turns WHERE id = ?");
@@ -420,7 +421,11 @@ export function openDatabase(dbPath: string): CachelaneDb {
 
   db.restoreStub = (p: RestoreStubParams) => void restoreStubStmt.run(p);
 
-  db.insertTurn = (p: InsertTurnParams) => void insertTurnStmt.run(p);
+  db.insertTurn = (p: InsertTurnParams) => void insertTurnStmt.run({
+    ...p,
+    signals: p.signals ?? null,
+    request_mutated: p.request_mutated ?? 0,
+  });
 
   db.getTurn = (id: string) =>
     (getTurnStmt.get(id) as TurnRow | undefined) ?? null;
@@ -520,6 +525,32 @@ export function openDatabase(dbPath: string): CachelaneDb {
     return row === undefined ? null : rowToTurnExplanation(row);
   };
 
+  db.getRecentTurnExplanations = (params: GetRecentTurnExplanationsParams) => {
+    const clauses: string[] = [];
+    const bindings: Record<string, string | number> = {};
+
+    if (params.workspace_id !== undefined) {
+      clauses.push("workspace_id = @workspace_id");
+      bindings.workspace_id = params.workspace_id;
+    }
+    if (params.session_id !== undefined) {
+      clauses.push("session_id = @session_id");
+      bindings.session_id = params.session_id;
+    }
+    bindings.limit = params.limit;
+
+    const sql = clauses.length === 0 ? "" : `WHERE ${clauses.join(" AND ")}`;
+
+    const stmt = rawDb.prepare(`
+      SELECT * FROM turn_explanations
+      ${sql}
+      ORDER BY turn_number DESC, created_at DESC, id DESC
+      LIMIT @limit
+    `);
+    const rows = stmt.all(bindings) as TurnExplanationRow[];
+    return rows.map(rowToTurnExplanation);
+  };
+
   db.getStats = (params: GetStatsParams): CachelaneStats => {
     const where = scopedWhere(params);
     const stmt = rawDb.prepare(`
@@ -533,7 +564,8 @@ export function openDatabase(dbPath: string): CachelaneDb {
         COALESCE(SUM(pruned_blocks_count), 0) AS pruned_blocks,
         COALESCE(SUM(CASE WHEN pruned_blocks_count > 0 THEN 1 ELSE 0 END), 0) AS turns_with_pruning,
         COALESCE(SUM(keepalive_pings_since_last_turn), 0) AS keepalive_pings,
-        COALESCE(SUM(CASE WHEN keepalive_pings_since_last_turn > 0 THEN 1 ELSE 0 END), 0) AS turns_with_keepalive
+        COALESCE(SUM(CASE WHEN keepalive_pings_since_last_turn > 0 THEN 1 ELSE 0 END), 0) AS turns_with_keepalive,
+        COALESCE(SUM(CASE WHEN request_mutated = 0 THEN 1 ELSE 0 END), 0) AS pipeline_fallback_turns
       FROM turns
       ${where.sql}
     `);
@@ -548,6 +580,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       turns_with_pruning: number;
       keepalive_pings: number;
       turns_with_keepalive: number;
+      pipeline_fallback_turns: number;
     };
     const baseline =
       row.input_tokens +
@@ -574,6 +607,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       effective_cost_units: row.effective_cost_units,
       baseline_cost_units: baseline,
       savings_ratio: savingsRatio,
+      pipeline_fallback_turns: row.pipeline_fallback_turns,
       pruner_counts: {
         pruned_blocks: row.pruned_blocks,
         turns_with_pruning: row.turns_with_pruning,

@@ -13,6 +13,7 @@ export function formatStats(stats: CachelaneStats): string {
     `Scope: ${stats.scope}`,
     `Turns: ${stats.turns}`,
     `Cache hit ratio: ${percent(stats.cache_hit_ratio)}`,
+    `Pipeline fallback turns: ${stats.pipeline_fallback_turns}`,
     `Effective cost units: ${stats.effective_cost_units.toFixed(2)}`,
     `Baseline cost units: ${stats.baseline_cost_units.toFixed(2)}`,
     `Savings ratio: ${percent(stats.savings_ratio)}`,

@@ -45,6 +45,8 @@ export interface TurnRow {
   middle_breakpoint_hash: string | null;
   pruned_blocks_count: number;
   keepalive_pings_since_last_turn: number;
+  signals: string | null;
+  request_mutated: number;
   created_at: number;
 }
 
@@ -87,6 +89,8 @@ export interface InsertTurnParams {
   middle_breakpoint_hash: string | null;
   pruned_blocks_count: number;
   keepalive_pings_since_last_turn: number;
+  signals?: string | null;
+  request_mutated?: number;
   created_at: number;
 }
 
@@ -175,6 +179,7 @@ export interface CachelaneDb extends Database.Database {
   updateTurnUsage(params: UpdateTurnUsageParams): void;
   insertTurnExplanation(params: InsertTurnExplanationParams): void;
   getTurnExplanation(params?: GetTurnExplanationParams): TurnExplanationRecord | null;
+  getRecentTurnExplanations(params: GetRecentTurnExplanationsParams): TurnExplanationRecord[];
   getStats(params: GetStatsParams): CachelaneStats;
 }
 
@@ -298,6 +303,7 @@ export interface CachelaneStats {
   effective_cost_units: number;
   baseline_cost_units: number;
   savings_ratio: number;
+  pipeline_fallback_turns: number;
   pruner_counts: {
     pruned_blocks: number;
     turns_with_pruning: number;
@@ -312,6 +318,12 @@ export interface GetTurnExplanationParams {
   workspace_id?: string;
   session_id?: string;
   turn_number?: number;
+}
+
+export interface GetRecentTurnExplanationsParams {
+  workspace_id?: string;
+  session_id?: string;
+  limit: number;
 }
 
 export interface GetRecentTurnParams {
