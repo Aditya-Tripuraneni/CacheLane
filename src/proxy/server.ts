@@ -6,6 +6,7 @@ import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
+import { logger } from "../logger/index.js";
 import type { AnthropicMessagesRequest, AnthropicMessage } from "../orchestrator/index.js";
 import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
@@ -147,17 +148,7 @@ function forwardUpstream(
     },
   );
 
-  upstreamReq.on("error", (err) => {
-    console.error("[cachelane proxy] upstream error", err.message);
-    if (!res.headersSent) {
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "upstream_error", message: err.message }));
-    } else {
-      res.destroy();
-    }
-  });
-
-  upstreamReq.write(body);
+    upstreamReq.write(body);
   upstreamReq.end();
 }
 
@@ -211,7 +202,7 @@ export function createProxyServer(
       const method = req.method ?? "GET";
       const reqPath = req.url ?? "/";
 
-      console.info("[cachelane proxy] incoming", { method, path: reqPath });
+      logger.info("incoming", JSON.stringify({ method, path: reqPath }));
 
       // Only intercept POST /v1/messages — strip query string before matching
       // Claude Code appends ?beta=true and similar query params
@@ -234,11 +225,13 @@ export function createProxyServer(
         return;
       }
 
+      let currentTurn = 0;
+      const turnId = randomUUID();
       try {
         const config = loadConfig(opts.config_path ?? defaultConfigPath());
 
         const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
-        const currentTurn = stats.turns + 1;
+        currentTurn = stats.turns + 1;
 
         const messageClassifications = classifyAllMessages(
           parsed.messages,
@@ -246,7 +239,6 @@ export function createProxyServer(
           config,
         );
 
-        const turnId = randomUUID();
         const result = handlePreRequest({
           db,
           tracker,
@@ -265,12 +257,12 @@ export function createProxyServer(
           : body;
 
         if (result.mutated) {
-          console.info("[cachelane proxy] mutated request", {
+          logger.info("mutated request", JSON.stringify({
             session: sessionId,
             turn: currentTurn,
             signals: result.signals,
             pruned: result.pruned_blocks_count,
-          });
+          }));
         }
 
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
@@ -286,17 +278,31 @@ export function createProxyServer(
           prefixHash: result.prefix_hash,
           middleHash: result.middle_hash,
           prunedCount: result.pruned_blocks_count,
+          requestMutated: result.mutated ? 1 : 0,
+          signals: result.signals,
         });
       } catch (err) {
         // Fail-open: pipeline error → forward original request unchanged.
         // DB is owned by the caller; do NOT close it here.
-        console.error("[cachelane proxy] pipeline error — failing open", err instanceof Error ? err.message : String(err));
-        forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
+        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err);
+        proxyAndRecord(upstream, method, reqPath, headersFromIncoming(req), body, res, {
+          db,
+          workspaceId,
+          sessionId,
+          currentTurn: currentTurn || 1, // Fallback turn if failed before stats
+          turnId,
+          model: parsed.model || "unknown",
+          prefixHash: "",
+          middleHash: null,
+          prunedCount: 0,
+          requestMutated: 0,
+          signals: ["error:fallback"],
+        });
       }
     });
 
     req.on("error", (err) => {
-      console.error("[cachelane proxy] request error", err.message);
+      logger.error("request error", err.message, err);
       if (!res.headersSent) { res.writeHead(500); }
       res.end();
     });
@@ -325,9 +331,8 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
 
   server.listen(port, "127.0.0.1", () => {
     const boundPort = (server.address() as { port: number } | null)?.port ?? port;
-    console.info(`[cachelane proxy] listening on http://127.0.0.1:${boundPort}`);
-    console.info(`[cachelane proxy] session=${sessionId} workspace=${workspaceId}`);
-    console.info(`[cachelane proxy] set ANTHROPIC_BASE_URL=http://127.0.0.1:${boundPort}`);
+    logger.info("listening", `http://127.0.0.1:${boundPort}`);
+    logger.info("session initialized", JSON.stringify({ session: sessionId, workspace: workspaceId }));
   });
 
   return server;
@@ -343,6 +348,8 @@ interface RecordOptions {
   prefixHash: string;
   middleHash: string | null;
   prunedCount: number;
+  requestMutated?: number;
+  signals?: string[] | null;
 }
 
 function proxyAndRecord(
@@ -405,7 +412,7 @@ function proxyAndRecord(
   });
 
   upstreamReq.on("error", (err) => {
-    console.error("[cachelane proxy] upstream error", err.message);
+    logger.error("upstream error", err.message, err);
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream_error" }));
@@ -498,22 +505,24 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         middle_breakpoint_hash: opts.middleHash,
         pruned_blocks_count: opts.prunedCount,
         keepalive_pings_since_last_turn: 0,
+        request_mutated: opts.requestMutated ?? 0,
+        signals: opts.signals ? JSON.stringify(opts.signals) : null,
         created_at: Date.now(),
       });
-      console.info("[cachelane proxy] recorded turn", {
+      logger.info("recorded turn", JSON.stringify({
         turn: opts.currentTurn,
         input: inputTokens,
         cache_read: cacheRead,
         effective,
-      });
+      }));
     } catch (insertErr) {
       // UNIQUE constraint = turn already recorded (idempotent re-delivery)
       if (!(insertErr instanceof Error && insertErr.message.includes("UNIQUE"))) {
-        console.error("[cachelane proxy] failed to record turn", insertErr);
+        logger.error("failed to record turn", String(insertErr), insertErr);
       }
     }
   } catch (err) {
-    console.error("[cachelane proxy] failed to parse upstream response for recording", err);
+    logger.error("failed to parse upstream response for recording", String(err), err);
   }
 }
 
@@ -552,7 +561,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
               });
             } catch (err) {
               if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
-                console.error("[cachelane proxy] failed to insert block", err);
+                logger.error("failed to insert block", String(err), err);
               }
             }
           }
@@ -560,7 +569,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
       }
     }
   } catch (err) {
-    console.error("[cachelane proxy] failed to extract tool_result blocks", err);
+    logger.error("failed to extract tool_result blocks", String(err), err);
   }
 }
 

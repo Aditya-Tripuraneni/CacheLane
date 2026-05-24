@@ -16,6 +16,7 @@ import {
   statsInputSchema,
   type CachelaneMcpContext,
 } from "./tools.js";
+import { healthInputSchema, handleHealthTool } from "./health.js";
 
 export type {
   CachelaneMcpContext,
@@ -85,6 +86,16 @@ export function createCachelaneMcpServer(
       inputSchema: expandInputSchema,
     },
     async (input) => jsonTextPayload(handleExpandTool(context, input)),
+  );
+
+  server.registerTool(
+    "cachelane:health",
+    {
+      title: "CacheLane Health",
+      description: "Return health status and degraded fallback metrics.",
+      inputSchema: healthInputSchema,
+    },
+    async (input) => jsonTextPayload(handleHealthTool(context, input)),
   );
 
   return server;
