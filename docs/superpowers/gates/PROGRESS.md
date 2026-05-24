@@ -8,7 +8,7 @@
 
 | Gate | Status | Tag | Human validated |
 |------|--------|-----|-----------------|
-| G1: Install Foundation | pending | — | — |
+| G1: Install Foundation | awaiting-human-validation | `gate-1-done` (78ef960) | — |
 | G2: Unified MCP+Proxy Process | pending | — | — |
 | G3: K-Pruner Wiring + Pipeline Smoke Test | pending | — | — |
 | G4: Fail-Open Observability | pending | — | — |
