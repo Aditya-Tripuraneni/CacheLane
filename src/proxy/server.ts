@@ -257,15 +257,21 @@ export function createProxyServer(
           pruner: config.pruner,
         });
 
-        const forwardBody = result.mutated
+        const actuallyMutate = config.features.mutation_enabled && result.mutated;
+        const forwardBody = actuallyMutate
           ? Buffer.from(JSON.stringify(result.request), "utf-8")
           : body;
 
-        if (result.mutated) {
+        const finalSignals = [...result.signals];
+        if (!config.features.mutation_enabled) {
+          finalSignals.push("mode:baseline");
+        }
+
+        if (actuallyMutate) {
           logger.info("mutated request", JSON.stringify({
             session: sessionId,
             turn: currentTurn,
-            signals: result.signals,
+            signals: finalSignals,
             pruned: result.pruned_blocks_count,
           }));
         }
@@ -283,8 +289,8 @@ export function createProxyServer(
           prefixHash: result.prefix_hash,
           middleHash: result.middle_hash,
           prunedCount: result.pruned_blocks_count,
-          requestMutated: result.mutated ? 1 : 0,
-          signals: result.signals,
+          requestMutated: actuallyMutate ? 1 : 0,
+          signals: finalSignals,
         });
       } catch (err) {
         // Fail-open: pipeline error → forward original request unchanged.

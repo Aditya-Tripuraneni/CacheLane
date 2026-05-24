@@ -43,6 +43,7 @@ const configSchema = z.object({
       auto_proxy: z.boolean(),
       k_pruner: z.boolean(),
       keepalive: z.boolean(),
+      mutation_enabled: z.boolean().default(true),
     })
     .default(DEFAULT_CONFIG.features),
   health: z

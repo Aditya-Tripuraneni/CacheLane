@@ -36,6 +36,7 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     auto_proxy: false,
     k_pruner: true,
     keepalive: true,
+    mutation_enabled: true,
   },
   health: {
     fallback_warning_threshold_pct: 5,

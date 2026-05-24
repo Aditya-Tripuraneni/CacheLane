@@ -13,4 +13,7 @@
 - Modify: `README.md` (docs lint)
 
 ## Status log
-- (blocked on G6)
+- (done) Implemented baseline mode with `mutation_enabled` config flag
+- (done) Added `cachelane benchmark compare` to `src/cli/index.ts` and `src/benchmark/baseline-compare.ts`
+- (done) Verified `README.md` does not mention "proxy"
+- All Gate 7 acceptance criteria met!

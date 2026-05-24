@@ -12,9 +12,9 @@
 | G2: Unified MCP+Proxy Process | done | `gate-2-done` (c895efa) | user (2026-05-24) |
 | G3: K-Pruner Wiring + Pipeline Smoke Test | done | `gate-3-done` (c4d0810) | auto (2026-05-24) |
 | G4: Fail-Open Observability | done | `gate-4-done` (65e3f47) | user (2026-05-24) |
-| G5: Session Resume + Keepalive | done | `gate-5-done` (TBD) | auto (2026-05-24) |
-| G6: Multi-Window Session ID | in-progress | — | — |
-| G7: Baseline A/B + Acceptance Suite | pending | — | — |
+| G5: Session Resume + Keepalive | done | `gate-5-done` (5569606) | auto (2026-05-24) |
+| G6: Multi-Window Session ID | done | `gate-6-done` (f3d991a) | auto (2026-05-24) |
+| G7: Baseline A/B + Acceptance Suite | in-progress | — | — |
 
 ## Status values
 - `pending` — not yet started

@@ -82,6 +82,7 @@ export interface CachelaneConfig {
     auto_proxy: boolean;
     k_pruner: boolean;
     keepalive: boolean;
+    mutation_enabled: boolean;
   };
   health: {
     fallback_warning_threshold_pct: number;
