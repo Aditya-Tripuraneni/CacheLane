@@ -443,6 +443,25 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       printConfig(io, loadConfig(cachelaneConfigPath(env)));
     });
 
+  const benchmarkCmd = program.command("benchmark").description("Benchmark suite");
+  
+  benchmarkCmd
+    .command("compare")
+    .description("Compare CacheLane vs Baseline on a recorded agent trace")
+    .argument("<trace>", "Path to normalized trace directory")
+    .action(async (trace: string) => {
+      const { loadNormalizedTraceSessions } = await import("../benchmark/recorded.js");
+      const { runBaselineCompare } = await import("../benchmark/baseline-compare.js");
+      const sessions = loadNormalizedTraceSessions(trace);
+      const output = runBaselineCompare({
+        run_id: "cli",
+        generated_at: new Date().toISOString(),
+        sessions,
+        normalized_dir: trace,
+      });
+      io.stdout(output + "\n");
+    });
+
   return program;
 }
 

@@ -70,5 +70,27 @@ export interface CachelaneConfig {
     opt_in: boolean;
     endpoint: string;
   };
-  log_level: "trace" | "debug" | "info" | "warn" | "error";
+  proxy: {
+    port: number;
+    host: string;
+    drain_timeout_ms: number;
+    upstream_host: string;
+    upstream_port: number;
+    upstream_ssl: boolean;
+  };
+  features: {
+    auto_proxy: boolean;
+    k_pruner: boolean;
+    keepalive: boolean;
+    mutation_enabled: boolean;
+  };
+  health: {
+    fallback_warning_threshold_pct: number;
+    fallback_window_turns: number;
+  };
+  logging: {
+    level: "error" | "warn" | "info" | "debug";
+    max_file_bytes: number;
+    max_files: number;
+  };
 }
