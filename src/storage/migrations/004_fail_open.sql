@@ -1,0 +1,2 @@
+ALTER TABLE turns ADD COLUMN signals TEXT;
+ALTER TABLE turns ADD COLUMN request_mutated INTEGER DEFAULT 0;
