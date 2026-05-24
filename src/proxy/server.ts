@@ -1,6 +1,6 @@
 import http from "node:http";
 import https from "node:https";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { loadConfig } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
@@ -61,6 +61,39 @@ function messagesToUnclassifiedBlocks(
       isToolUseResultPair: isToolResultMsg || isToolUseMsg,
     } satisfies UnclassifiedBlock;
   });
+}
+
+export function computeBlockPlacements(
+  messages: AnthropicMessage[],
+  blocks: import("../storage/index.js").BlockRow[]
+): import("../pruner/index.js").PromptBlockPlacement[] {
+  const placements: import("../pruner/index.js").PromptBlockPlacement[] = [];
+  const blockMap = new Map(blocks.map(b => [b.id, b]));
+
+  for (let mIdx = 0; mIdx < messages.length; mIdx++) {
+    const msg = messages[mIdx];
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      for (let cIdx = 0; cIdx < msg.content.length; cIdx++) {
+        const c = msg.content[cIdx] as any;
+        if (c.type === "tool_result" && c.tool_use_id) {
+          const row = blockMap.get(c.tool_use_id);
+          if (row) {
+            placements.push({
+              block_id: row.id,
+              message_index: mIdx,
+              content_index: cIdx,
+              kind: row.kind,
+              volatility: row.volatility,
+              is_pinned: row.is_pinned === 1,
+              refetch_handle: row.refetch_handle,
+              restored_at_turn: row.restored_at_turn
+            });
+          }
+        }
+      }
+    }
+  }
+  return placements;
 }
 
 function classifyAllMessages(
@@ -223,7 +256,7 @@ export function createProxyServer(
           current_turn: currentTurn,
           original_request: parsed,
           message_classifications: messageClassifications,
-          block_placements: [],
+          block_placements: computeBlockPlacements(parsed.messages, db.getBlocksBySession(workspaceId, sessionId)),
           pruner: config.pruner,
         });
 
@@ -328,7 +361,9 @@ function proxyAndRecord(
     if (finished) return;
     finished = true;
     if (status === "recorded") {
-      recordUsageFromResponse(Buffer.concat(responseChunks), recordOpts);
+      const responseBody = Buffer.concat(responseChunks);
+      recordUsageFromResponse(responseBody, recordOpts);
+      extractAndInsertToolResults(body, recordOpts);
     }
     // DB lifetime is owned by the caller (startProxy or tryBindProxy);
     // do NOT close here.
@@ -479,6 +514,53 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
     }
   } catch (err) {
     console.error("[cachelane proxy] failed to parse upstream response for recording", err);
+  }
+}
+
+function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
+  try {
+    const req = JSON.parse(body.toString("utf-8")) as AnthropicMessagesRequest;
+    if (!req.messages || !Array.isArray(req.messages)) return;
+
+    for (const msg of req.messages) {
+      if (msg.role === "user" && Array.isArray(msg.content)) {
+        for (const c of msg.content) {
+          if (c.type === "tool_result" && c.tool_use_id) {
+            const contentStr = typeof c.content === "string" ? c.content : JSON.stringify(c.content);
+            const tokenCount = Math.ceil(contentStr.length / 4);
+            const contentHash = createHash("sha256").update(contentStr).digest("hex");
+            
+            try {
+              opts.db.insertBlock({
+                id: c.tool_use_id,
+                workspace_id: opts.workspaceId,
+                session_id: opts.sessionId,
+                content_hash: contentHash,
+                kind: "tool_output",
+                volatility: "VOLATILE",
+                is_pinned: false,
+                token_count: tokenCount,
+                added_at_turn: opts.currentTurn,
+                last_referenced_at_turn: opts.currentTurn,
+                unused_turns: 0,
+                is_stub: false,
+                stub_summary: null,
+                refetch_handle: null,
+                restored_at_turn: null,
+                created_at: Date.now(),
+                updated_at: Date.now(),
+              });
+            } catch (err) {
+              if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
+                console.error("[cachelane proxy] failed to insert block", err);
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[cachelane proxy] failed to extract tool_result blocks", err);
   }
 }
 

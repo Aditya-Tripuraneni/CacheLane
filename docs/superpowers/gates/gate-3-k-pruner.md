@@ -11,4 +11,4 @@
 - Create: `src/proxy/__tests__/pipeline-smoke.test.ts`
 
 ## Status log
-- (blocked on G2)
+- in-progress (subagent dispatched)
