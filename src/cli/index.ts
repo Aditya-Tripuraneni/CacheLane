@@ -6,6 +6,7 @@ import { Command } from "commander";
 import { loadConfig } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
+import { startProxy } from "../proxy/server.js";
 import {
   addExcludePattern,
   addPinPattern,
@@ -415,6 +416,24 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       } catch {
         // Fail open — don't crash Claude Code
       }
+    });
+
+  program
+    .command("proxy")
+    .description("Start HTTP proxy that intercepts Anthropic API calls and runs the CacheLane pipeline")
+    .option("--port <number>", "Port to listen on (default: 7332)", (v) => parseInt(v, 10), 7332)
+    .option("--db <path>", "SQLite database path")
+    .option("--config <path>", "CacheLane config path")
+    .option("--workspace-id <id>", "Workspace scope")
+    .option("--session-id <id>", "Session scope (default: auto-generated UUID)")
+    .action((cmd: { port: number; db?: string; config?: string; workspaceId?: string; sessionId?: string }) => {
+      startProxy({
+        port: cmd.port,
+        db_path: cmd.db ?? cachelaneDbPath(env),
+        config_path: cmd.config ?? cachelaneConfigPath(env),
+        workspace_id: cmd.workspaceId,
+        session_id: cmd.sessionId,
+      });
     });
 
   program

@@ -105,4 +105,69 @@ describe("mutateRequest", () => {
       "user",
     ]);
   });
+
+  // Regression: Claude Code pre-populates 5m cache_control markers on tools and
+  // system blocks. If left in place, placing a 1h prefix after an existing 5m
+  // marker violates Anthropic's ordering rule (1h must not follow 5m in the
+  // tools→system→messages processing order). mutateRequest must strip all
+  // existing markers before placing its own.
+  describe("strips pre-existing cache_control markers before placing its own", () => {
+    it("removes existing 5m markers from non-last tools when placing a 1h prefix", () => {
+      const requestWithExistingMarkers: AnthropicMessagesRequest = {
+        ...baseRequest,
+        tools: [
+          { name: "Read", input_schema: { type: "object" }, cache_control: { type: "ephemeral", ttl: "5m" } },
+          { name: "Bash", input_schema: { type: "object" }, cache_control: { type: "ephemeral", ttl: "5m" } },
+        ],
+      };
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(requestWithExistingMarkers, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      }, "1h");
+
+      // Only the last tool should have a marker, and it must be 1h
+      expect(out.tools?.[0]?.cache_control).toBeUndefined();
+      expect(out.tools?.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+    });
+
+    it("removes existing markers from system blocks when placing prefix on last system", () => {
+      const requestWithSystemMarkers: AnthropicMessagesRequest = {
+        ...baseRequest,
+        tools: undefined,
+        system: [
+          { type: "text", text: "Block A", cache_control: { type: "ephemeral", ttl: "5m" } },
+          { type: "text", text: "Block B" },
+        ],
+      };
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(requestWithSystemMarkers, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      }, "1h");
+
+      expect(out.system?.[0]?.cache_control).toBeUndefined();
+      expect(out.system?.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+    });
+
+    it("removes existing markers from message content blocks", () => {
+      const requestWithMsgMarkers: AnthropicMessagesRequest = {
+        ...baseRequest,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral", ttl: "5m" } }],
+          },
+        ],
+      };
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(requestWithMsgMarkers, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      const content = out.messages[0]?.content;
+      expect(Array.isArray(content) && (content[0] as { cache_control?: unknown }).cache_control).toBeUndefined();
+    });
+  });
 });

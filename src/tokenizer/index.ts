@@ -10,7 +10,11 @@ export { SUPPORTED_MODELS } from "./model-table.js";
  * and 4.7 produce distinct counts as the M1 gate requires.
  */
 export function countTokens(text: string, modelId: string): number {
-  const entry = MODEL_TABLE[modelId];
+  let entry = MODEL_TABLE[modelId];
+  if (!entry && modelId.startsWith("claude-")) {
+    // Unknown Claude model — use multiplier 1.0 as a safe approximation
+    entry = { variant: "claude", tokenCountMultiplier: 1.0 };
+  }
   if (!entry) {
     throw new Error(
       `unsupported model "${modelId}" — add it to src/tokenizer/model-table.ts. ` +

@@ -16,8 +16,20 @@ export interface ModelEntry {
 }
 
 export const MODEL_TABLE: Record<string, ModelEntry> = {
-  "claude-opus-4-6": { variant: "claude", tokenCountMultiplier: 1.0 },
+  // Opus 4.x
   "claude-opus-4-7": { variant: "claude", tokenCountMultiplier: 1.15 },
+  "claude-opus-4-6": { variant: "claude", tokenCountMultiplier: 1.0 },
+  "claude-opus-4-5": { variant: "claude", tokenCountMultiplier: 1.0 },
+  "claude-opus-4-1": { variant: "claude", tokenCountMultiplier: 1.0 },
+  // Sonnet 4.x
+  "claude-sonnet-4-6": { variant: "claude", tokenCountMultiplier: 1.0 },
+  "claude-sonnet-4-5": { variant: "claude", tokenCountMultiplier: 1.0 },
+  // Haiku 4.x (both dateless alias and pinned snapshot ID)
+  "claude-haiku-4-5": { variant: "claude", tokenCountMultiplier: 1.0 },
+  "claude-haiku-4-5-20251001": { variant: "claude", tokenCountMultiplier: 1.0 },
+  // Haiku 3.5 (retired on direct API, still active on Bedrock/Vertex)
+  "claude-haiku-3-5": { variant: "claude", tokenCountMultiplier: 1.0 },
+  "claude-haiku-3-5-20241022": { variant: "claude", tokenCountMultiplier: 1.0 },
 };
 
 export const SUPPORTED_MODELS: string[] = Object.keys(MODEL_TABLE);

@@ -1,5 +1,6 @@
 import type {
   AnthropicCacheControl,
+  AnthropicMessageContent,
   AnthropicMessagesRequest,
   Breakpoints,
   PrefixState,
@@ -18,14 +19,27 @@ export function mutateRequest(
     type: "ephemeral",
     ttl: prefixTtl,
   };
+  // Strip ALL existing cache_control markers before placing CacheLane's own.
+  // Claude Code pre-populates its own 5m markers; leaving them in creates
+  // ordering violations when CacheLane places a 1h prefix marker after them
+  // (Anthropic rejects: 1h must not follow 5m in tools→system→messages order).
+  const stripCc = <T extends { cache_control?: unknown }>(block: T): Omit<T, "cache_control"> => {
+    const { cache_control: _cc, ...rest } = block;
+    return rest as Omit<T, "cache_control">;
+  };
+
   const out: AnthropicMessagesRequest = {
     ...originalRequest,
-    system: originalRequest.system?.map((s) => ({ ...s })),
-    tools: originalRequest.tools?.map((t) => ({ ...t })),
-    messages: originalRequest.messages.map((m) => ({
-      ...m,
-      content: m.content.map((c) => ({ ...c })) as typeof m.content,
-    })),
+    system: originalRequest.system?.map((s) => ({ ...stripCc(s) })),
+    tools: originalRequest.tools?.map((t) => ({ ...stripCc(t) })),
+    messages: originalRequest.messages.map((m) => {
+      // Anthropic API allows content as a plain string; skip deep-copy in that case
+      if (typeof m.content === "string") return { ...m };
+      return {
+        ...m,
+        content: (m.content as AnthropicMessageContent[]).map((c) => ({ ...stripCc(c) })),
+      };
+    }),
   };
 
   // Prefix breakpoint: marker on the last tool, or the last system block if no tools.
@@ -45,7 +59,7 @@ export function mutateRequest(
   ) {
     const lastSemiIdx = boundaries.middle_end_in_messages - 1;
     const msg = out.messages[lastSemiIdx];
-    if (msg && msg.content.length > 0) {
+    if (msg && Array.isArray(msg.content) && msg.content.length > 0) {
       const lastContent = msg.content.at(-1);
       if (lastContent) lastContent.cache_control = MIDDLE_MARKER;
     }
