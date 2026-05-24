@@ -6,6 +6,7 @@ import { openDatabase, type CachelaneDb } from "../storage/index.js";
 import { loadConfig } from "../config/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
 import { tryBindProxy, type ProxyLifecycle } from "../proxy/lifecycle.js";
+import { KeepaliveWorker, type KeepalivePingExecutor } from "../keepalive/index.js";
 import {
   expandInputSchema,
   explainInputSchema,
@@ -128,6 +129,8 @@ export async function startCachelaneStdioServer(
   const config = loadConfig(configPath);
 
   let lifecycle: ProxyLifecycle | null = null;
+  let keepaliveWorker: KeepaliveWorker | null = null;
+  
   if (config.features.auto_proxy) {
     lifecycle = await tryBindProxy(
       {
@@ -154,6 +157,26 @@ export async function startCachelaneStdioServer(
       console.info(
         `[cachelane] proxy listening on http://127.0.0.1:${lifecycle.port}`,
       );
+
+      // Initialize tracker from DB so keepalive can see idle sessions.
+      tracker.fromDb(db);
+
+      if (config.features.keepalive) {
+        // A real executor would need the API key from the intercepted requests to
+        // make an Anthropic API call with a synthetic prompt matching the cache.
+        // For Gate 5, we wire the worker; full executor logic is deferred/stubbed.
+        const executor: KeepalivePingExecutor = async (req) => {
+          console.info(`[cachelane] keepalive ping stub for ${req.workspace_id}:${req.session_id}`);
+          return { ok: true };
+        };
+
+        keepaliveWorker = new KeepaliveWorker({
+          tracker,
+          config: config.keepalive,
+          executor,
+        });
+        keepaliveWorker.start();
+      }
     }
   }
 
@@ -172,7 +195,9 @@ export async function startCachelaneStdioServer(
     if (shuttingDown) return;
     shuttingDown = true;
     try {
-      // TODO(m8-g5): stop keepalive worker
+      if (keepaliveWorker !== null) {
+        keepaliveWorker.stop();
+      }
       if (lifecycle !== null) {
         await lifecycle.shutdown();
       }
