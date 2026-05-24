@@ -8,8 +8,8 @@
 
 | Gate | Status | Tag | Human validated |
 |------|--------|-----|-----------------|
-| G1: Install Foundation | awaiting-human-validation | `gate-1-done` (78ef960) | — |
-| G2: Unified MCP+Proxy Process | pending | — | — |
+| G1: Install Foundation | done | `gate-1-done` (78ef960) | user (2026-05-24) |
+| G2: Unified MCP+Proxy Process | awaiting-human-validation | — | — |
 | G3: K-Pruner Wiring + Pipeline Smoke Test | pending | — | — |
 | G4: Fail-Open Observability | pending | — | — |
 | G5: Session Resume + Keepalive | pending | — | — |

@@ -2,7 +2,7 @@ import http from "node:http";
 import https from "node:https";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "../config/index.js";
-import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
+import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
@@ -148,8 +148,20 @@ export interface ProxyOptions {
   upstream?: Partial<UpstreamTarget>;
 }
 
-export function startProxy(opts: ProxyOptions = {}): http.Server {
-  const port = opts.port ?? DEFAULT_PORT;
+/**
+ * Build an HTTP server with the CacheLane proxy request handler wired up,
+ * but do NOT call listen(). The caller (startProxy or lifecycle.tryBindProxy)
+ * owns the listen call.
+ *
+ * DB and tracker are owned by the caller — this function never opens or closes
+ * the DB, and never instantiates a tracker. The DB must remain open for the
+ * full lifetime of the returned server.
+ */
+export function createProxyServer(
+  opts: ProxyOptions,
+  db: CachelaneDb,
+  tracker: CacheStateTracker,
+): http.Server {
   const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
   const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
   const upstream: UpstreamTarget = {
@@ -158,9 +170,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
     ssl: opts.upstream?.ssl ?? true,
   };
 
-  const tracker = new CacheStateTracker();
-
-  const server = http.createServer((req, res) => {
+  return http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", () => {
@@ -191,12 +201,8 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         return;
       }
 
-      // Run the CacheLane pipeline synchronously; DB ownership then transfers to proxyAndRecord.
-      // Use a nullable local so we can close on any error path before the transfer.
-      let db: ReturnType<typeof openDatabase> | null = null;
       try {
         const config = loadConfig(opts.config_path ?? defaultConfigPath());
-        db = openDatabase(opts.db_path ?? defaultDbPath());
 
         const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
         const currentTurn = stats.turns + 1;
@@ -237,10 +243,8 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
         upstreamHeaders["content-length"] = String(forwardBody.length);
 
-        const ownedDb = db;
-        db = null; // ownership transfers — proxyAndRecord is responsible for close()
         proxyAndRecord(upstream, method, reqPath, upstreamHeaders, forwardBody, res, {
-          db: ownedDb,
+          db,
           workspaceId,
           sessionId,
           currentTurn,
@@ -251,8 +255,8 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           prunedCount: result.pruned_blocks_count,
         });
       } catch (err) {
-        if (db !== null) { db.close(); }
-        // Fail-open: pipeline error → forward original request unchanged
+        // Fail-open: pipeline error → forward original request unchanged.
+        // DB is owned by the caller; do NOT close it here.
         console.error("[cachelane proxy] pipeline error — failing open", err instanceof Error ? err.message : String(err));
         forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
       }
@@ -264,18 +268,40 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       res.end();
     });
   });
+}
+
+export function startProxy(opts: ProxyOptions = {}): http.Server {
+  const port = opts.port ?? DEFAULT_PORT;
+  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
+  const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
+
+  // Standalone proxy: owns its DB and tracker for the lifetime of the server.
+  const db = openDatabase(opts.db_path ?? defaultDbPath());
+  const tracker = new CacheStateTracker();
+
+  const server = createProxyServer(
+    { ...opts, workspace_id: workspaceId, session_id: sessionId },
+    db,
+    tracker,
+  );
+
+  // When the server closes (e.g., afterEach cleanup, signal handler), release the DB.
+  server.once("close", () => {
+    try { db.close(); } catch { /* ignore double-close */ }
+  });
 
   server.listen(port, "127.0.0.1", () => {
-    console.info(`[cachelane proxy] listening on http://127.0.0.1:${port}`);
+    const boundPort = (server.address() as { port: number } | null)?.port ?? port;
+    console.info(`[cachelane proxy] listening on http://127.0.0.1:${boundPort}`);
     console.info(`[cachelane proxy] session=${sessionId} workspace=${workspaceId}`);
-    console.info(`[cachelane proxy] set ANTHROPIC_BASE_URL=http://127.0.0.1:${port}`);
+    console.info(`[cachelane proxy] set ANTHROPIC_BASE_URL=http://127.0.0.1:${boundPort}`);
   });
 
   return server;
 }
 
 interface RecordOptions {
-  db: ReturnType<typeof openDatabase>;
+  db: CachelaneDb;
   workspaceId: string;
   sessionId: string;
   currentTurn: number;
@@ -304,7 +330,8 @@ function proxyAndRecord(
     if (status === "recorded") {
       recordUsageFromResponse(Buffer.concat(responseChunks), recordOpts);
     }
-    recordOpts.db.close();
+    // DB lifetime is owned by the caller (startProxy or tryBindProxy);
+    // do NOT close here.
   };
 
   const upstreamReq = makeRequest(
