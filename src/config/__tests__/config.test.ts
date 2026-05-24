@@ -39,7 +39,7 @@ describe("loadConfig", () => {
 
   it("loads valid existing config unchanged", () => {
     const configPath = path.join(tmpDir, "config.json");
-    const custom: CachelaneConfig = {
+    const custom: Partial<CachelaneConfig> = {
       version: 1,
       pruner: { enabled: true, k: 5, mode: "conservative" },
       keepalive: {
@@ -118,7 +118,7 @@ describe("loadConfig", () => {
 
   it("falls back to defaults when pruner.k is out of range", () => {
     const configPath = path.join(tmpDir, "config.json");
-    const invalid: CachelaneConfig = {
+    const invalid: Partial<CachelaneConfig> = {
       version: 1,
       pruner: { enabled: true, k: 99, mode: "default" },
       keepalive: {
