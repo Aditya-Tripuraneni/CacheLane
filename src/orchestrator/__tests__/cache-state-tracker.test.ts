@@ -66,4 +66,38 @@ describe("CacheStateTracker", () => {
       { workspace_id: "ws-2", session_id: "s-2", state: makeState("ws-2", "b") },
     ]);
   });
+
+  it("loads state from DB recent turns", () => {
+    const mockDb = {
+      listSessions: () => [
+        { workspace_id: "ws-1", session_id: "s-1" },
+        { workspace_id: "ws-2", session_id: "s-2" },
+      ],
+      getRecentTurn: ({ session_id }: { session_id: string }) => {
+        if (session_id === "s-1") {
+          return {
+            prefix_breakpoint_hash: "prefix-a",
+            middle_breakpoint_hash: "middle-a",
+            cache_creation_1h_tokens: 100,
+            cache_creation_5m_tokens: 0,
+            cache_read_tokens: 50,
+            created_at: 1700000000000,
+          };
+        }
+        return null;
+      },
+    };
+
+    const t = new CacheStateTracker();
+    t.fromDb(mockDb as any);
+
+    expect(t.get("ws-1", "s-1")).toMatchObject({
+      prefix_hash: "prefix-a",
+      middle_hash: "middle-a",
+      prefix_token_count: 150,
+      ttl_class: "1h",
+      expected_expiry_ms: 1700000000000 + 3600000,
+    });
+    expect(t.get("ws-2", "s-2")).toBeUndefined();
+  });
 });

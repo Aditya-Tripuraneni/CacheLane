@@ -1,11 +1,13 @@
 import http from "node:http";
 import https from "node:https";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { loadConfig } from "../config/index.js";
-import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
+import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
+import type { UpdateBlockCountersParams } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
+import { logger } from "../logger/index.js";
 import type { AnthropicMessagesRequest, AnthropicMessage } from "../orchestrator/index.js";
 import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
@@ -63,6 +65,40 @@ function messagesToUnclassifiedBlocks(
   });
 }
 
+export function computeBlockPlacements(
+  messages: AnthropicMessage[],
+  blocks: import("../storage/index.js").BlockRow[]
+): import("../pruner/index.js").PromptBlockPlacement[] {
+  const placements: import("../pruner/index.js").PromptBlockPlacement[] = [];
+  const blockMap = new Map(blocks.map(b => [b.id, b]));
+
+  for (let mIdx = 0; mIdx < messages.length; mIdx++) {
+    const msg = messages[mIdx];
+    if (!msg) continue;
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      for (let cIdx = 0; cIdx < msg.content.length; cIdx++) {
+        const c = msg.content[cIdx] as any;
+        if (c.type === "tool_result" && c.tool_use_id) {
+          const row = blockMap.get(c.tool_use_id);
+          if (row) {
+            placements.push({
+              block_id: row.id,
+              message_index: mIdx,
+              content_index: cIdx,
+              kind: row.kind,
+              volatility: row.volatility,
+              is_pinned: row.is_pinned === 1,
+              refetch_handle: row.refetch_handle,
+              restored_at_turn: row.restored_at_turn
+            });
+          }
+        }
+      }
+    }
+  }
+  return placements;
+}
+
 function classifyAllMessages(
   messages: AnthropicMessage[],
   currentTurn: number,
@@ -114,17 +150,7 @@ function forwardUpstream(
     },
   );
 
-  upstreamReq.on("error", (err) => {
-    console.error("[cachelane proxy] upstream error", err.message);
-    if (!res.headersSent) {
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "upstream_error", message: err.message }));
-    } else {
-      res.destroy();
-    }
-  });
-
-  upstreamReq.write(body);
+    upstreamReq.write(body);
   upstreamReq.end();
 }
 
@@ -148,19 +174,28 @@ export interface ProxyOptions {
   upstream?: Partial<UpstreamTarget>;
 }
 
-export function startProxy(opts: ProxyOptions = {}): http.Server {
-  const port = opts.port ?? DEFAULT_PORT;
+/**
+ * Build an HTTP server with the CacheLane proxy request handler wired up,
+ * but do NOT call listen(). The caller (startProxy or lifecycle.tryBindProxy)
+ * owns the listen call.
+ *
+ * DB and tracker are owned by the caller — this function never opens or closes
+ * the DB, and never instantiates a tracker. The DB must remain open for the
+ * full lifetime of the returned server.
+ */
+export function createProxyServer(
+  opts: ProxyOptions,
+  db: CachelaneDb,
+  tracker: CacheStateTracker,
+): http.Server {
   const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
-  const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
   const upstream: UpstreamTarget = {
     host: opts.upstream?.host ?? DEFAULT_UPSTREAM_HOST,
     port: opts.upstream?.port ?? DEFAULT_UPSTREAM_PORT,
     ssl: opts.upstream?.ssl ?? true,
   };
 
-  const tracker = new CacheStateTracker();
-
-  const server = http.createServer((req, res) => {
+  return http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
     req.on("end", () => {
@@ -168,7 +203,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
       const method = req.method ?? "GET";
       const reqPath = req.url ?? "/";
 
-      console.info("[cachelane proxy] incoming", { method, path: reqPath });
+      logger.info("incoming", JSON.stringify({ method, path: reqPath }));
 
       // Only intercept POST /v1/messages — strip query string before matching
       // Claude Code appends ?beta=true and similar query params
@@ -191,15 +226,24 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
         return;
       }
 
-      // Run the CacheLane pipeline synchronously; DB ownership then transfers to proxyAndRecord.
-      // Use a nullable local so we can close on any error path before the transfer.
-      let db: ReturnType<typeof openDatabase> | null = null;
+      const requestHeaders = headersFromIncoming(req);
+      const sessionIdHeader = requestHeaders["x-claude-code-session-id"];
+      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0
+        ? sessionIdHeader
+        : (opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID());
+
+      // Compute referenced IDs before the try block so the fail-open path can
+      // still pass them through — we don't want to increment unused_turns for
+      // blocks that are actually present in the request even if the pipeline errors.
+      const referencedIds = extractReferencedBlockIds(parsed.messages);
+
+      let currentTurn = 0;
+      const turnId = randomUUID();
       try {
         const config = loadConfig(opts.config_path ?? defaultConfigPath());
-        db = openDatabase(opts.db_path ?? defaultDbPath());
 
         const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
-        const currentTurn = stats.turns + 1;
+        currentTurn = stats.turns + 1;
 
         const messageClassifications = classifyAllMessages(
           parsed.messages,
@@ -207,7 +251,6 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           config,
         );
 
-        const turnId = randomUUID();
         const result = handlePreRequest({
           db,
           tracker,
@@ -217,30 +260,33 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           current_turn: currentTurn,
           original_request: parsed,
           message_classifications: messageClassifications,
-          block_placements: [],
+          block_placements: computeBlockPlacements(parsed.messages, db.getBlocksBySession(workspaceId, sessionId)),
           pruner: config.pruner,
         });
 
-        const forwardBody = result.mutated
+        const actuallyMutate = config.features.mutation_enabled && result.mutated;
+        const forwardBody = actuallyMutate
           ? Buffer.from(JSON.stringify(result.request), "utf-8")
           : body;
 
-        if (result.mutated) {
-          console.info("[cachelane proxy] mutated request", {
-            session: sessionId,
+        const finalSignals = [...result.signals];
+        if (!config.features.mutation_enabled) {
+          finalSignals.push("mode:baseline");
+        }
+
+        if (actuallyMutate) {
+          logger.info("mutated request", JSON.stringify({
             turn: currentTurn,
-            signals: result.signals,
+            signals: finalSignals,
             pruned: result.pruned_blocks_count,
-          });
+          }), { session_id: sessionId });
         }
 
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
         upstreamHeaders["content-length"] = String(forwardBody.length);
 
-        const ownedDb = db;
-        db = null; // ownership transfers — proxyAndRecord is responsible for close()
         proxyAndRecord(upstream, method, reqPath, upstreamHeaders, forwardBody, res, {
-          db: ownedDb,
+          db,
           workspaceId,
           sessionId,
           currentTurn,
@@ -249,33 +295,89 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
           prefixHash: result.prefix_hash,
           middleHash: result.middle_hash,
           prunedCount: result.pruned_blocks_count,
+          requestMutated: actuallyMutate ? 1 : 0,
+          signals: finalSignals,
+          referencedIds,
         });
       } catch (err) {
-        if (db !== null) { db.close(); }
-        // Fail-open: pipeline error → forward original request unchanged
-        console.error("[cachelane proxy] pipeline error — failing open", err instanceof Error ? err.message : String(err));
-        forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
+        // Fail-open: pipeline error → forward original request unchanged.
+        // DB is owned by the caller; do NOT close it here.
+        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err, { session_id: sessionId });
+        proxyAndRecord(upstream, method, reqPath, headersFromIncoming(req), body, res, {
+          db,
+          workspaceId,
+          sessionId,
+          currentTurn: currentTurn || 1, // Fallback turn if failed before stats
+          turnId,
+          model: parsed.model || "unknown",
+          prefixHash: "",
+          middleHash: null,
+          prunedCount: 0,
+          requestMutated: 0,
+          signals: ["error:fallback"],
+          referencedIds,
+        });
       }
     });
 
     req.on("error", (err) => {
-      console.error("[cachelane proxy] request error", err.message);
+      logger.error("request error", err.message, err);
       if (!res.headersSent) { res.writeHead(500); }
       res.end();
     });
   });
+}
+
+export function startProxy(opts: ProxyOptions = {}): http.Server {
+  const port = opts.port ?? DEFAULT_PORT;
+  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
+  const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
+
+  // Standalone proxy: owns its DB and tracker for the lifetime of the server.
+  const db = openDatabase(opts.db_path ?? defaultDbPath());
+  const tracker = new CacheStateTracker();
+
+  const server = createProxyServer(
+    { ...opts, workspace_id: workspaceId, session_id: sessionId },
+    db,
+    tracker,
+  );
+
+  // When the server closes (e.g., afterEach cleanup, signal handler), release the DB.
+  server.once("close", () => {
+    try { db.close(); } catch { /* ignore double-close */ }
+  });
 
   server.listen(port, "127.0.0.1", () => {
-    console.info(`[cachelane proxy] listening on http://127.0.0.1:${port}`);
-    console.info(`[cachelane proxy] session=${sessionId} workspace=${workspaceId}`);
-    console.info(`[cachelane proxy] set ANTHROPIC_BASE_URL=http://127.0.0.1:${port}`);
+    const boundPort = (server.address() as { port: number } | null)?.port ?? port;
+    logger.info("listening", `http://127.0.0.1:${boundPort}`);
+    logger.info("session initialized", JSON.stringify({ workspace: workspaceId }), { session_id: sessionId });
   });
 
   return server;
 }
 
+/**
+ * Extract the set of tool_use_ids that appear as tool_result blocks in the
+ * current request.  These are the blocks "referenced" this turn — their
+ * unused_turns counter will be reset to 0 rather than incremented.
+ */
+function extractReferencedBlockIds(messages: AnthropicMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      for (const c of msg.content as Array<Record<string, unknown>>) {
+        if (c.type === "tool_result" && typeof c.tool_use_id === "string") {
+          ids.add(c.tool_use_id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
 interface RecordOptions {
-  db: ReturnType<typeof openDatabase>;
+  db: CachelaneDb;
   workspaceId: string;
   sessionId: string;
   currentTurn: number;
@@ -284,6 +386,10 @@ interface RecordOptions {
   prefixHash: string;
   middleHash: string | null;
   prunedCount: number;
+  requestMutated?: number;
+  signals?: string[] | null;
+  /** Block IDs (tool_use_ids) present in the current request — used to update unused_turns. */
+  referencedIds: Set<string>;
 }
 
 function proxyAndRecord(
@@ -302,9 +408,26 @@ function proxyAndRecord(
     if (finished) return;
     finished = true;
     if (status === "recorded") {
-      recordUsageFromResponse(Buffer.concat(responseChunks), recordOpts);
+      const responseBody = Buffer.concat(responseChunks);
+      recordUsageFromResponse(responseBody, recordOpts);
+      // Update unused_turns BEFORE inserting new blocks so newly inserted
+      // blocks start at unused_turns=0 and only age from the next turn onward.
+      try {
+        const countersParams: UpdateBlockCountersParams = {
+          workspace_id: recordOpts.workspaceId,
+          session_id: recordOpts.sessionId,
+          turn_number: recordOpts.currentTurn,
+          referenced_ids: recordOpts.referencedIds,
+          updated_at: Date.now(),
+        };
+        recordOpts.db.updateBlockCounters(countersParams);
+      } catch (err) {
+        logger.error("failed to update block counters", String(err), err, { session_id: recordOpts.sessionId });
+      }
+      extractAndInsertToolResults(body, recordOpts);
     }
-    recordOpts.db.close();
+    // DB lifetime is owned by the caller (startProxy or tryBindProxy);
+    // do NOT close here.
   };
 
   const upstreamReq = makeRequest(
@@ -343,7 +466,7 @@ function proxyAndRecord(
   });
 
   upstreamReq.on("error", (err) => {
-    console.error("[cachelane proxy] upstream error", err.message);
+    logger.error("upstream error", err.message, err, { session_id: recordOpts.sessionId });
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream_error" }));
@@ -436,22 +559,75 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         middle_breakpoint_hash: opts.middleHash,
         pruned_blocks_count: opts.prunedCount,
         keepalive_pings_since_last_turn: 0,
+        request_mutated: opts.requestMutated ?? 0,
+        signals: opts.signals ? JSON.stringify(opts.signals) : null,
         created_at: Date.now(),
       });
-      console.info("[cachelane proxy] recorded turn", {
+      logger.info("recorded turn", JSON.stringify({
         turn: opts.currentTurn,
         input: inputTokens,
         cache_read: cacheRead,
         effective,
-      });
+      }), { session_id: opts.sessionId });
     } catch (insertErr) {
       // UNIQUE constraint = turn already recorded (idempotent re-delivery)
       if (!(insertErr instanceof Error && insertErr.message.includes("UNIQUE"))) {
-        console.error("[cachelane proxy] failed to record turn", insertErr);
+        logger.error("failed to record turn", String(insertErr), insertErr, { session_id: opts.sessionId });
       }
     }
   } catch (err) {
-    console.error("[cachelane proxy] failed to parse upstream response for recording", err);
+    logger.error("failed to parse upstream response for recording", String(err), err, { session_id: opts.sessionId });
+  }
+}
+
+function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
+  try {
+    const req = JSON.parse(body.toString("utf-8")) as AnthropicMessagesRequest;
+    if (!req.messages || !Array.isArray(req.messages)) return;
+
+    for (const msg of req.messages) {
+      if (msg.role === "user" && Array.isArray(msg.content)) {
+        for (const c of msg.content) {
+          if (c.type === "tool_result" && c.tool_use_id) {
+            const contentStr = typeof c.content === "string" ? c.content : JSON.stringify(c.content);
+            const tokenCount = Math.ceil(contentStr.length / 4);
+            const contentHash = createHash("sha256").update(contentStr).digest("hex");
+            
+            try {
+              opts.db.insertBlock({
+                id: c.tool_use_id,
+                workspace_id: opts.workspaceId,
+                session_id: opts.sessionId,
+                content_hash: contentHash,
+                kind: "tool_output",
+                volatility: "VOLATILE",
+                is_pinned: false,
+                token_count: tokenCount,
+                added_at_turn: opts.currentTurn,
+                last_referenced_at_turn: opts.currentTurn,
+                unused_turns: 0,
+                is_stub: false,
+                stub_summary: null,
+                // tool_use_id is the natural refetch handle: the stub display
+                // text shows it so the model can identify which tool call to
+                // re-run via cachelane:expand.  Must be non-null for the
+                // K-pruner's SQL filter (refetch_handle IS NOT NULL) to match.
+                refetch_handle: c.tool_use_id,
+                restored_at_turn: null,
+                created_at: Date.now(),
+                updated_at: Date.now(),
+              });
+            } catch (err) {
+              if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
+                logger.error("failed to insert block", String(err), err, { session_id: opts.sessionId });
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.error("failed to extract tool_result blocks", String(err), err, { session_id: opts.sessionId });
   }
 }
 

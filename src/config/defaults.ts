@@ -24,5 +24,27 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     opt_in: false,
     endpoint: "",
   },
-  log_level: "info",
+  proxy: {
+    port: 7332,
+    host: "127.0.0.1",
+    drain_timeout_ms: 5000,
+    upstream_host: "api.anthropic.com",
+    upstream_port: 443,
+    upstream_ssl: true,
+  },
+  features: {
+    auto_proxy: false,
+    k_pruner: true,
+    keepalive: true,
+    mutation_enabled: true,
+  },
+  health: {
+    fallback_warning_threshold_pct: 5,
+    fallback_window_turns: 20,
+  },
+  logging: {
+    level: "info",
+    max_file_bytes: 10_485_760,
+    max_files: 5,
+  },
 };

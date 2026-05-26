@@ -28,7 +28,37 @@ const configSchema = z.object({
     opt_in: z.boolean(),
     endpoint: z.string().default(""),
   }),
-  log_level: z.enum(["trace", "debug", "info", "warn", "error"]),
+  proxy: z
+    .object({
+      port: z.number().int().positive(),
+      host: z.string(),
+      drain_timeout_ms: z.number().int().nonnegative(),
+      upstream_host: z.string(),
+      upstream_port: z.number().int().positive(),
+      upstream_ssl: z.boolean(),
+    })
+    .default(DEFAULT_CONFIG.proxy),
+  features: z
+    .object({
+      auto_proxy: z.boolean(),
+      k_pruner: z.boolean(),
+      keepalive: z.boolean(),
+      mutation_enabled: z.boolean().default(true),
+    })
+    .default(DEFAULT_CONFIG.features),
+  health: z
+    .object({
+      fallback_warning_threshold_pct: z.number().nonnegative(),
+      fallback_window_turns: z.number().int().positive(),
+    })
+    .default(DEFAULT_CONFIG.health),
+  logging: z
+    .object({
+      level: z.enum(["error", "warn", "info", "debug"]),
+      max_file_bytes: z.number().int().positive(),
+      max_files: z.number().int().positive(),
+    })
+    .default(DEFAULT_CONFIG.logging),
 });
 
 export function loadConfig(configPath: string): CachelaneConfig {

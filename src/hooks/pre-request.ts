@@ -191,12 +191,22 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       now_ms: input.now_ms,
     });
 
+    // Only materialize blocks that have a placement in the current request.
+    // Blocks without placements (e.g. they've dropped out of the conversation
+    // context) are still marked as stubs in the DB by pruneExpiredBlocks, but
+    // the request body can't be mutated for them since there's no content slot
+    // to replace.
+    const placementIds = new Set(input.block_placements.map((p) => p.block_id));
+    const actionableDecisions = pruneResult.decisions.filter((d) =>
+      placementIds.has(d.block_id),
+    );
+
     const requestWithStubs =
-      pruneResult.decisions.length === 0
+      actionableDecisions.length === 0
         ? input.original_request
         : materializePrunedBlocks({
             request: input.original_request,
-            decisions: pruneResult.decisions,
+            decisions: actionableDecisions,
             block_placements: input.block_placements,
           });
 
@@ -214,8 +224,11 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
 
     const result = {
       ...orchestrated,
-      pruned_blocks_count: pruneResult.pruned_blocks_count,
-      prune_decisions: pruneResult.decisions,
+      // Only count blocks that were actually materialized (had a placement).
+      // Blocks marked as stubs in the DB but absent from the request are
+      // already gone from context; they don't reduce the forwarded request.
+      pruned_blocks_count: actionableDecisions.length,
+      prune_decisions: actionableDecisions,
       effective_message_classifications: effectiveClassifications,
     };
     recordExplanation(input, result);

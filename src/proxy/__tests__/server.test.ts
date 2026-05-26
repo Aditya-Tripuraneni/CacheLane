@@ -445,30 +445,20 @@ describe("proxy pipeline integration", () => {
       expect(lastCaptured?.body).toBe(noMsgs);
     });
 
-    it("logs a pipeline-error and still forwards the request when DB open fails", async () => {
-      const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-      // db_path is a directory — openDatabase will throw
-      const badProxy = startProxy({
-        port: 0,
-        db_path: tmpDir,
-        workspace_id: "test-ws",
-        session_id: "bad-session",
-        upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
-      });
-      const badPort = await waitForServer(badProxy);
-
-      try {
-        const res = await postMessages(badPort, JSON.stringify(buildMessagesRequest()));
-        // Should still get 200 from upstream because fail-open forwarded the original
-        expect(res.status).toBe(200);
-        expect(spy).toHaveBeenCalledWith(
-          expect.stringContaining("failing open"),
-          expect.any(String),
-        );
-      } finally {
-        await closeServer(badProxy);
-      }
+    it("throws synchronously when the DB cannot be opened at startup", () => {
+      // M8-G2: DB lifetime is now owned by startProxy (opened once at startup,
+      // not per-request). A bad db_path should fail fast at boot. Fail-open at
+      // the bind layer is the lifecycle's responsibility (tryBindProxy), not the
+      // per-request handler's.
+      expect(() =>
+        startProxy({
+          port: 0,
+          db_path: tmpDir, // a directory — openDatabase will throw
+          workspace_id: "test-ws",
+          session_id: "bad-session",
+          upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+        }),
+      ).toThrow();
     });
 
     it("returns 502 when the upstream connection is refused", async () => {
@@ -538,6 +528,35 @@ describe("proxy pipeline integration", () => {
           req.tools?.some((t) => t.cache_control !== undefined) ||
           req.system?.some((s) => s.cache_control !== undefined);
         expect(hasCacheControl).toBe(true);
+      }
+    });
+
+    it("isolates sequential requests into separate sessions using x-claude-code-session-id header", async () => {
+      // Turn 1 for session A
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-A" });
+      await waitForTurn(dbPath, "session-A", 1);
+
+      // Turn 1 for session B
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-B" });
+      await waitForTurn(dbPath, "session-B", 1);
+
+      // Turn 2 for session A
+      await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()), { "x-claude-code-session-id": "session-A" });
+      await waitForTurn(dbPath, "session-A", 2);
+
+      const db = openDatabase(dbPath);
+      try {
+        const statsA = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "session-A" });
+        expect(statsA.turns).toBe(2);
+
+        const statsB = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "session-B" });
+        expect(statsB.turns).toBe(1);
+
+        // Fallback session shouldn't have any turns
+        const statsFallback = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "test-session" });
+        expect(statsFallback.turns).toBe(0);
+      } finally {
+        db.close();
       }
     });
   });
