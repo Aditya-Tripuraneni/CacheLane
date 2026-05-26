@@ -276,11 +276,10 @@ export function createProxyServer(
 
         if (actuallyMutate) {
           logger.info("mutated request", JSON.stringify({
-            session: sessionId,
             turn: currentTurn,
             signals: finalSignals,
             pruned: result.pruned_blocks_count,
-          }));
+          }), { session_id: sessionId });
         }
 
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
@@ -303,7 +302,7 @@ export function createProxyServer(
       } catch (err) {
         // Fail-open: pipeline error → forward original request unchanged.
         // DB is owned by the caller; do NOT close it here.
-        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err);
+        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err, { session_id: sessionId });
         proxyAndRecord(upstream, method, reqPath, headersFromIncoming(req), body, res, {
           db,
           workspaceId,
@@ -352,7 +351,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
   server.listen(port, "127.0.0.1", () => {
     const boundPort = (server.address() as { port: number } | null)?.port ?? port;
     logger.info("listening", `http://127.0.0.1:${boundPort}`);
-    logger.info("session initialized", JSON.stringify({ session: sessionId, workspace: workspaceId }));
+    logger.info("session initialized", JSON.stringify({ workspace: workspaceId }), { session_id: sessionId });
   });
 
   return server;
@@ -423,7 +422,7 @@ function proxyAndRecord(
         };
         recordOpts.db.updateBlockCounters(countersParams);
       } catch (err) {
-        logger.error("failed to update block counters", String(err), err);
+        logger.error("failed to update block counters", String(err), err, { session_id: recordOpts.sessionId });
       }
       extractAndInsertToolResults(body, recordOpts);
     }
@@ -467,7 +466,7 @@ function proxyAndRecord(
   });
 
   upstreamReq.on("error", (err) => {
-    logger.error("upstream error", err.message, err);
+    logger.error("upstream error", err.message, err, { session_id: recordOpts.sessionId });
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream_error" }));
@@ -569,15 +568,15 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         input: inputTokens,
         cache_read: cacheRead,
         effective,
-      }));
+      }), { session_id: opts.sessionId });
     } catch (insertErr) {
       // UNIQUE constraint = turn already recorded (idempotent re-delivery)
       if (!(insertErr instanceof Error && insertErr.message.includes("UNIQUE"))) {
-        logger.error("failed to record turn", String(insertErr), insertErr);
+        logger.error("failed to record turn", String(insertErr), insertErr, { session_id: opts.sessionId });
       }
     }
   } catch (err) {
-    logger.error("failed to parse upstream response for recording", String(err), err);
+    logger.error("failed to parse upstream response for recording", String(err), err, { session_id: opts.sessionId });
   }
 }
 
@@ -620,7 +619,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
               });
             } catch (err) {
               if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
-                logger.error("failed to insert block", String(err), err);
+                logger.error("failed to insert block", String(err), err, { session_id: opts.sessionId });
               }
             }
           }
@@ -628,7 +627,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
       }
     }
   } catch (err) {
-    logger.error("failed to extract tool_result blocks", String(err), err);
+    logger.error("failed to extract tool_result blocks", String(err), err, { session_id: opts.sessionId });
   }
 }
 
