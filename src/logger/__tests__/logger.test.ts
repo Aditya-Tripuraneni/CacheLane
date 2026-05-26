@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { Logger } from '../index';
+import { Logger } from '../index.js';
 
 describe('Logger', () => {
   let logDir: string;
@@ -35,7 +35,7 @@ describe('Logger', () => {
     const lines = content.trim().split('\n');
     expect(lines.length).toBe(1);
 
-    const parsed = JSON.parse(lines[0]);
+    const parsed = JSON.parse(lines[0]!);
     expect(parsed).toMatchObject({
       ts: '2026-05-24T12:00:00.000Z',
       level: 'info',
@@ -74,8 +74,8 @@ describe('Logger', () => {
     const lines = content.trim().split('\n');
     expect(lines.length).toBe(2);
 
-    expect(JSON.parse(lines[0]).level).toBe('warn');
-    expect(JSON.parse(lines[1]).level).toBe('error');
+    expect(JSON.parse(lines[0]!).level).toBe('warn');
+    expect(JSON.parse(lines[1]!).level).toBe('error');
   });
 
   it('should respect CACHELANE_DEBUG env variable', () => {

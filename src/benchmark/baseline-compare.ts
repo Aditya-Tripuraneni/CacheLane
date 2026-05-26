@@ -4,7 +4,7 @@ export function runBaselineCompare(options: GenerateRecordedBenchmarkOptions): s
   const report = generateRecordedBenchmarkReport(options);
 
   const lines = [];
-  lines.push(`Trace: ${options.sessions.length > 0 ? options.sessions[0].scenario_id : "unknown"} (${report.counts.turns} turns)`);
+  lines.push(`Trace: ${options.sessions.length > 0 ? (options.sessions[0]?.scenario_id ?? "unknown") : "unknown"} (${report.counts.turns} turns)`);
   lines.push("");
   lines.push("                               Baseline (no CacheLane)  With CacheLane   Delta");
   lines.push(`Turns                                              ${String(report.counts.turns).padEnd(16)} ${report.counts.turns}      —`);
