@@ -3,6 +3,7 @@ import https from "node:https";
 import { randomUUID, createHash } from "node:crypto";
 import { loadConfig } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
+import type { UpdateBlockCountersParams } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
@@ -73,6 +74,7 @@ export function computeBlockPlacements(
 
   for (let mIdx = 0; mIdx < messages.length; mIdx++) {
     const msg = messages[mIdx];
+    if (!msg) continue;
     if (msg.role === "user" && Array.isArray(msg.content)) {
       for (let cIdx = 0; cIdx < msg.content.length; cIdx++) {
         const c = msg.content[cIdx] as any;
@@ -226,9 +228,14 @@ export function createProxyServer(
 
       const requestHeaders = headersFromIncoming(req);
       const sessionIdHeader = requestHeaders["x-claude-code-session-id"];
-      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0 
-        ? sessionIdHeader 
+      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0
+        ? sessionIdHeader
         : (opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID());
+
+      // Compute referenced IDs before the try block so the fail-open path can
+      // still pass them through — we don't want to increment unused_turns for
+      // blocks that are actually present in the request even if the pipeline errors.
+      const referencedIds = extractReferencedBlockIds(parsed.messages);
 
       let currentTurn = 0;
       const turnId = randomUUID();
@@ -269,11 +276,10 @@ export function createProxyServer(
 
         if (actuallyMutate) {
           logger.info("mutated request", JSON.stringify({
-            session: sessionId,
             turn: currentTurn,
             signals: finalSignals,
             pruned: result.pruned_blocks_count,
-          }));
+          }), { session_id: sessionId });
         }
 
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
@@ -291,11 +297,12 @@ export function createProxyServer(
           prunedCount: result.pruned_blocks_count,
           requestMutated: actuallyMutate ? 1 : 0,
           signals: finalSignals,
+          referencedIds,
         });
       } catch (err) {
         // Fail-open: pipeline error → forward original request unchanged.
         // DB is owned by the caller; do NOT close it here.
-        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err);
+        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err, { session_id: sessionId });
         proxyAndRecord(upstream, method, reqPath, headersFromIncoming(req), body, res, {
           db,
           workspaceId,
@@ -308,6 +315,7 @@ export function createProxyServer(
           prunedCount: 0,
           requestMutated: 0,
           signals: ["error:fallback"],
+          referencedIds,
         });
       }
     });
@@ -343,10 +351,29 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
   server.listen(port, "127.0.0.1", () => {
     const boundPort = (server.address() as { port: number } | null)?.port ?? port;
     logger.info("listening", `http://127.0.0.1:${boundPort}`);
-    logger.info("session initialized", JSON.stringify({ session: sessionId, workspace: workspaceId }));
+    logger.info("session initialized", JSON.stringify({ workspace: workspaceId }), { session_id: sessionId });
   });
 
   return server;
+}
+
+/**
+ * Extract the set of tool_use_ids that appear as tool_result blocks in the
+ * current request.  These are the blocks "referenced" this turn — their
+ * unused_turns counter will be reset to 0 rather than incremented.
+ */
+function extractReferencedBlockIds(messages: AnthropicMessage[]): Set<string> {
+  const ids = new Set<string>();
+  for (const msg of messages) {
+    if (msg.role === "user" && Array.isArray(msg.content)) {
+      for (const c of msg.content as Array<Record<string, unknown>>) {
+        if (c.type === "tool_result" && typeof c.tool_use_id === "string") {
+          ids.add(c.tool_use_id);
+        }
+      }
+    }
+  }
+  return ids;
 }
 
 interface RecordOptions {
@@ -361,6 +388,8 @@ interface RecordOptions {
   prunedCount: number;
   requestMutated?: number;
   signals?: string[] | null;
+  /** Block IDs (tool_use_ids) present in the current request — used to update unused_turns. */
+  referencedIds: Set<string>;
 }
 
 function proxyAndRecord(
@@ -381,6 +410,20 @@ function proxyAndRecord(
     if (status === "recorded") {
       const responseBody = Buffer.concat(responseChunks);
       recordUsageFromResponse(responseBody, recordOpts);
+      // Update unused_turns BEFORE inserting new blocks so newly inserted
+      // blocks start at unused_turns=0 and only age from the next turn onward.
+      try {
+        const countersParams: UpdateBlockCountersParams = {
+          workspace_id: recordOpts.workspaceId,
+          session_id: recordOpts.sessionId,
+          turn_number: recordOpts.currentTurn,
+          referenced_ids: recordOpts.referencedIds,
+          updated_at: Date.now(),
+        };
+        recordOpts.db.updateBlockCounters(countersParams);
+      } catch (err) {
+        logger.error("failed to update block counters", String(err), err, { session_id: recordOpts.sessionId });
+      }
       extractAndInsertToolResults(body, recordOpts);
     }
     // DB lifetime is owned by the caller (startProxy or tryBindProxy);
@@ -423,7 +466,7 @@ function proxyAndRecord(
   });
 
   upstreamReq.on("error", (err) => {
-    logger.error("upstream error", err.message, err);
+    logger.error("upstream error", err.message, err, { session_id: recordOpts.sessionId });
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream_error" }));
@@ -525,15 +568,15 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         input: inputTokens,
         cache_read: cacheRead,
         effective,
-      }));
+      }), { session_id: opts.sessionId });
     } catch (insertErr) {
       // UNIQUE constraint = turn already recorded (idempotent re-delivery)
       if (!(insertErr instanceof Error && insertErr.message.includes("UNIQUE"))) {
-        logger.error("failed to record turn", String(insertErr), insertErr);
+        logger.error("failed to record turn", String(insertErr), insertErr, { session_id: opts.sessionId });
       }
     }
   } catch (err) {
-    logger.error("failed to parse upstream response for recording", String(err), err);
+    logger.error("failed to parse upstream response for recording", String(err), err, { session_id: opts.sessionId });
   }
 }
 
@@ -565,14 +608,18 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
                 unused_turns: 0,
                 is_stub: false,
                 stub_summary: null,
-                refetch_handle: null,
+                // tool_use_id is the natural refetch handle: the stub display
+                // text shows it so the model can identify which tool call to
+                // re-run via cachelane:expand.  Must be non-null for the
+                // K-pruner's SQL filter (refetch_handle IS NOT NULL) to match.
+                refetch_handle: c.tool_use_id,
                 restored_at_turn: null,
                 created_at: Date.now(),
                 updated_at: Date.now(),
               });
             } catch (err) {
               if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
-                logger.error("failed to insert block", String(err), err);
+                logger.error("failed to insert block", String(err), err, { session_id: opts.sessionId });
               }
             }
           }
@@ -580,7 +627,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
       }
     }
   } catch (err) {
-    logger.error("failed to extract tool_result blocks", String(err), err);
+    logger.error("failed to extract tool_result blocks", String(err), err, { session_id: opts.sessionId });
   }
 }
 
