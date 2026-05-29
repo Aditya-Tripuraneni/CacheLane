@@ -519,7 +519,7 @@ export async function runCli(argv = process.argv, options: CliOptions = {}): Pro
   await createCachelaneCli(options).parseAsync(argv);
 }
 
-const _argv1 = process.argv[1] ? (() => { try { return realpathSync(process.argv[1]); } catch { return process.argv[1]; } })() : "";
+const _argv1 = process.argv[1] ? (() => { try { return realpathSync(process.argv[1]).replace(/\\/g, "/"); } catch { return process.argv[1].replace(/\\/g, "/"); } })() : "";
 if (_argv1 && (
   _argv1.endsWith("dist/cli/index.js") ||
   _argv1.endsWith("dist/cli/index.cjs") ||
