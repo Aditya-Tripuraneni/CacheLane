@@ -1,16 +1,15 @@
-import { generateRecordedBenchmarkReport, type GenerateRecordedBenchmarkOptions, type RecordedBenchmarkReport } from "./recorded.js";
+import { generateRecordedBenchmarkReport, type GenerateRecordedBenchmarkOptions } from "./recorded.js";
 
 export function runBaselineCompare(options: GenerateRecordedBenchmarkOptions): string {
   const report = generateRecordedBenchmarkReport(options);
 
   const lines = [];
-  lines.push(`Trace: ${options.sessions.length > 0 ? (options.sessions[0]?.scenario_id ?? "unknown") : "unknown"} (${report.counts.turns} turns)`);
+  lines.push(`Trace: ${options.sessions.length > 0 ? options.sessions[0]?.scenario_id : "unknown"} (${report.counts.turns} turns)`);
   lines.push("");
   lines.push("                               Baseline (no CacheLane)  With CacheLane   Delta");
   lines.push(`Turns                                              ${String(report.counts.turns).padEnd(16)} ${report.counts.turns}      —`);
   
   const totalTokens = report.totals.baseline_cost_units;
-  const baselineInputTokens = totalTokens; // The trace simulation assumes baseline is no cache
   
   lines.push(`Total input tokens                          ${String(totalTokens).padEnd(14)}  ${totalTokens}      0`);
   

@@ -18,7 +18,8 @@ export function cachelaneDbPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function claudeMcpPath(env: NodeJS.ProcessEnv = process.env): string {
-  return path.join(claudeHome(env), "mcp.json");
+  if (env.CLAUDE_HOME) return path.join(env.CLAUDE_HOME, "mcp.json");
+  return path.join(homedir(), ".claude.json");
 }
 
 export function claudeHookPath(env: NodeJS.ProcessEnv = process.env): string {

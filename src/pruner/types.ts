@@ -4,6 +4,8 @@ export interface PruneExpiredBlocksParams {
   workspace_id: string;
   session_id: string;
   k: number;
+  /** Current turn number — blocks added >= k turns ago are eligible for pruning. */
+  current_turn: number;
   enabled?: boolean;
   now_ms?: number;
 }

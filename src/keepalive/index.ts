@@ -216,6 +216,7 @@ export class KeepaliveWorker {
                 ...latestState,
                 last_read_at_ms: nowMs,
                 expected_expiry_ms: nextExpiry(nowMs, latestState.ttl_class),
+                keepalive_pings_since_last_turn: (latestState.keepalive_pings_since_last_turn ?? 0) + 1,
               });
             }
             result.pinged += 1;

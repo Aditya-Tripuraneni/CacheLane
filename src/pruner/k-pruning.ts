@@ -19,6 +19,7 @@ export function pruneExpiredBlocks(
     workspace_id: params.workspace_id,
     session_id: params.session_id,
     k: params.k,
+    current_turn: params.current_turn,
   });
 
   // Build the full decision list first (no DB writes yet)

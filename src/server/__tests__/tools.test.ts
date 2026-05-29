@@ -72,6 +72,37 @@ function insertBlock(id: string, overrides: Partial<Parameters<typeof db.insertB
   });
 }
 
+function insertExplanation(
+  id: string,
+  turnNumber: number,
+  overrides: Partial<Parameters<typeof db.insertTurnExplanation>[0]> = {},
+) {
+  const now = 1_715_000_000_000 + turnNumber;
+  db.insertTurnExplanation({
+    turn_id: id,
+    workspace_id: "ws-1",
+    session_id: "sess-1",
+    turn_number: turnNumber,
+    model: "claude-opus-4-7",
+    prefix_breakpoint_hash: null,
+    middle_breakpoint_hash: null,
+    mutated: false,
+    pruned_blocks_count: 0,
+    prune_decisions: [],
+    block_metadata: [],
+    region_metadata: {
+      message_count: 1,
+      stable_count: 0,
+      semi_count: 0,
+      volatile_count: 1,
+    },
+    signals: [],
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  });
+}
+
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cachelane-server-"));
   db = openDatabase(path.join(tmpDir, "test.db"));
@@ -120,51 +151,8 @@ describe("MCP tool handlers", () => {
   });
 
   it("explain returns latest by default and requested turn when provided", () => {
-    const now = 1_715_000_000_000;
-    db.insertTurnExplanation({
-      turn_id: "turn-explain-1",
-      workspace_id: "ws-1",
-      session_id: "sess-1",
-      turn_number: 1,
-      model: "claude-opus-4-7",
-      prefix_breakpoint_hash: null,
-      middle_breakpoint_hash: null,
-      mutated: false,
-      pruned_blocks_count: 0,
-      prune_decisions: [],
-      block_metadata: [],
-      region_metadata: {
-        message_count: 1,
-        stable_count: 0,
-        semi_count: 0,
-        volatile_count: 1,
-      },
-      signals: [],
-      created_at: now,
-      updated_at: now,
-    });
-    db.insertTurnExplanation({
-      turn_id: "turn-explain-2",
-      workspace_id: "ws-1",
-      session_id: "sess-1",
-      turn_number: 2,
-      model: "claude-opus-4-7",
-      prefix_breakpoint_hash: null,
-      middle_breakpoint_hash: null,
-      mutated: false,
-      pruned_blocks_count: 0,
-      prune_decisions: [],
-      block_metadata: [],
-      region_metadata: {
-        message_count: 1,
-        stable_count: 0,
-        semi_count: 0,
-        volatile_count: 1,
-      },
-      signals: [],
-      created_at: now + 1,
-      updated_at: now + 1,
-    });
+    insertExplanation("turn-explain-1", 1);
+    insertExplanation("turn-explain-2", 2);
 
     expect(handleExplainTool(context(), {})).toMatchObject({
       found: true,
@@ -173,6 +161,36 @@ describe("MCP tool handlers", () => {
     expect(handleExplainTool(context(), { turn: 1 })).toMatchObject({
       found: true,
       explanation: { turn_number: 1 },
+    });
+  });
+
+  it("explain uses the same default session resolution as session stats", () => {
+    insertTurn("turn-sess-1", 1, {
+      session_id: "sess-1",
+      created_at: 1_715_000_000_000,
+    });
+    insertTurn("turn-sess-2", 1, {
+      session_id: "sess-2",
+      created_at: 1_715_000_000_100,
+    });
+    insertExplanation("turn-explain-sess-1", 1, {
+      session_id: "sess-1",
+      signals: ["sess-1"],
+    });
+    insertExplanation("turn-explain-sess-2", 1, {
+      session_id: "sess-2",
+      signals: ["sess-2"],
+      created_at: 1_715_000_000_100,
+      updated_at: 1_715_000_000_100,
+    });
+
+    expect(handleExplainTool({ ...context(), session_id: "default" }, {})).toMatchObject({
+      found: true,
+      explanation: { session_id: "sess-2", signals: ["sess-2"] },
+    });
+    expect(handleExplainTool(context(), {})).toMatchObject({
+      found: true,
+      explanation: { session_id: "sess-1", signals: ["sess-1"] },
     });
   });
 

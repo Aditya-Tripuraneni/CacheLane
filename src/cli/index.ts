@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import { realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import path from "node:path";
+
 import { Command } from "commander";
 import { loadConfig } from "../config/index.js";
-import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
+import { openDatabase } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
 import { startProxy } from "../proxy/server.js";
 import {
@@ -19,6 +20,7 @@ import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
 import {
+  cachelaneHome,
   cachelaneConfigPath,
   cachelaneDbPath,
 } from "./paths.js";
@@ -88,6 +90,14 @@ function parsePositiveTurn(value: string): number {
   return turn;
 }
 
+function parsePositiveLimit(value: string): number {
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`Invalid limit: ${value}`);
+  }
+  return limit;
+}
+
 async function readStdin(): Promise<string> {
   return new Promise((resolve, reject) => {
     let buffer = "";
@@ -98,6 +108,42 @@ async function readStdin(): Promise<string> {
     process.stdin.on("end", () => resolve(buffer));
     process.stdin.on("error", reject);
   });
+}
+
+function readPrunerDebugEntries(logPath: string, limit: number): unknown[] {
+  let content: string;
+  try {
+    content = fs.readFileSync(logPath, "utf-8");
+  } catch {
+    return [];
+  }
+
+  const entries: unknown[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    try {
+      const row = JSON.parse(trimmed) as Record<string, unknown>;
+      if (row.event !== "pruner debug") continue;
+
+      const message =
+        typeof row.message === "string"
+          ? (JSON.parse(row.message) as Record<string, unknown>)
+          : {};
+
+      entries.push({
+        ts: row.ts,
+        pid: row.pid,
+        session_id: message.session_id ?? row.session_id,
+        ...message,
+      });
+    } catch {
+      // Skip malformed log lines; debug output should stay best-effort.
+    }
+  }
+
+  return entries.slice(-limit);
 }
 
 interface TranscriptApiCall {
@@ -151,13 +197,6 @@ function parseTranscriptApiCalls(content: string): TranscriptApiCall[] {
 
 async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, unknown>): Promise<void> {
   try {
-    const sessionId =
-      (typeof parsed.session_id === "string" ? parsed.session_id : undefined) ??
-      (typeof parsed.sessionId === "string" ? parsed.sessionId : undefined) ??
-      env.CACHELANE_SESSION_ID ??
-      "default";
-    const workspaceId = env.CACHELANE_WORKSPACE_ID ?? "default";
-
     const transcriptPath =
       typeof parsed.transcript_path === "string" ? parsed.transcript_path : null;
     if (!transcriptPath) return;
@@ -172,45 +211,9 @@ async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, un
     const calls = parseTranscriptApiCalls(content);
     if (calls.length === 0) return;
 
-    const db = openDatabase(cachelaneDbPath(env));
-    try {
-      const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
-      let nextTurn = stats.turns + 1;
-
-      for (const call of calls) {
-        const effective = calculateEffectiveCostUnits({
-          input_tokens: call.input_tokens,
-          cache_creation_5m_tokens: call.cache_creation_5m_tokens,
-          cache_creation_1h_tokens: call.cache_creation_1h_tokens,
-          cache_read_tokens: call.cache_read_tokens,
-        });
-        try {
-          db.insertTurn({
-            id: call.id,
-            workspace_id: workspaceId,
-            session_id: sessionId,
-            turn_number: nextTurn,
-            model: call.model,
-            input_tokens: call.input_tokens,
-            output_tokens: call.output_tokens,
-            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
-            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
-            cache_read_tokens: call.cache_read_tokens,
-            effective_cost_units: effective,
-            prefix_breakpoint_hash: null,
-            middle_breakpoint_hash: null,
-            pruned_blocks_count: 0,
-            keepalive_pings_since_last_turn: 0,
-            created_at: call.created_at,
-          });
-          nextTurn++;
-        } catch {
-          // Already recorded (UNIQUE constraint on id)
-        }
-      }
-    } finally {
-      db.close();
-    }
+    // The inline HTTP proxy owns turn recording, including accurate token
+    // counts, cache savings, and pruned block counts. The hook remains a
+    // fail-open no-op for older Claude Code registrations.
   } catch (err) {
     process.stderr.write(`[cachelane] hook error: ${err instanceof Error ? err.message : String(err)}\n`);
   }
@@ -386,6 +389,20 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       io.stdout(cmd.json ? jsonLine(report) : `${formatDoctor(report)}\n`);
     });
 
+  const debugCmd = program
+    .command("debug")
+    .description("Read structured CacheLane debug logs");
+
+  debugCmd
+    .command("pruner")
+    .description("Print recent pruner debug entries as a single JSON array")
+    .option("--limit <number>", "number of entries to return", parsePositiveLimit, 5)
+    .option("--log <path>", "CacheLane log path")
+    .action((cmd: { limit: number; log?: string }) => {
+      const logPath = cmd.log ?? path.join(cachelaneHome(env), "cachelane.log");
+      io.stdout(jsonLine(readPrunerDebugEntries(logPath, cmd.limit)));
+    });
+
   program
     .command("install")
     .description("Register CacheLane MCP and hook integration")
@@ -462,6 +479,39 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       io.stdout(output + "\n");
     });
 
+  benchmarkCmd
+    .command("live-report")
+    .description("Analyze and report cache savings/costs from local SQLite database")
+    .option("--db <path>", "SQLite database path")
+    .option("--session <id>", "Report on a specific session")
+    .option("--json", "Output as JSON")
+    .action(async (cmd: { db?: string; session?: string; json?: boolean }) => {
+      const { runLiveReport } = await import("../benchmark/index.js");
+      runLiveReport(cmd);
+    });
+
+  benchmarkCmd
+    .command("ab-test")
+    .description("Run a live A/B toggle test of CacheLane savings")
+    .option("--turns-per-phase <number>", "Number of turns per phase (default: 5)", (v) => parseInt(v, 10), 5)
+    .option("--db <path>", "SQLite database path")
+    .option("--scope <scope>", "Scope for turn detection (session, workspace, all) (default: session)")
+    .action(async (cmd: { turnsPerPhase: number; db?: string; scope?: string }) => {
+      const { runLiveAbTest } = await import("../benchmark/index.js");
+      await runLiveAbTest(cmd);
+    });
+
+  benchmarkCmd
+    .command("dashboard")
+    .description("View the live benchmark dashboard terminal TUI")
+    .option("--interval <seconds>", "Refresh interval in seconds (default: 3)", (v) => parseInt(v, 10), 3)
+    .option("--db <path>", "SQLite database path")
+    .option("--scope <scope>", "Scope for stats aggregation (session, workspace, all) (default: session)")
+    .action(async (cmd: { interval: number; db?: string; scope?: string }) => {
+      const { runDashboard } = await import("../benchmark/index.js");
+      runDashboard(cmd);
+    });
+
   return program;
 }
 
@@ -470,7 +520,12 @@ export async function runCli(argv = process.argv, options: CliOptions = {}): Pro
 }
 
 const _argv1 = process.argv[1] ? (() => { try { return realpathSync(process.argv[1]); } catch { return process.argv[1]; } })() : "";
-if (_argv1 && fileURLToPath(import.meta.url) === _argv1) {
+if (_argv1 && (
+  _argv1.endsWith("dist/cli/index.js") ||
+  _argv1.endsWith("dist/cli/index.cjs") ||
+  _argv1.endsWith("bin/cachelane") ||
+  _argv1.endsWith("src/cli/index.ts")
+)) {
   runCli().catch((err) => {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exitCode = 1;

@@ -74,7 +74,7 @@ describe("Health tool handler", () => {
     const status = handleHealthTool(context(), {});
     expect(status).toMatchObject({
       status: "ok",
-      explanation: "0 of the last 5 turns in the current session used fallback mode.",
+      explanation: "0 of the last 5 workspace turns used fallback mode.",
     });
   });
 
@@ -87,7 +87,7 @@ describe("Health tool handler", () => {
     const status = handleHealthTool(context(), {});
     expect(status).toMatchObject({
       status: "ok",
-      explanation: "1 of the last 20 turns in the current session used fallback mode.",
+      explanation: "1 of the last 20 workspace turns used fallback mode.",
     });
   });
 
@@ -101,7 +101,7 @@ describe("Health tool handler", () => {
     const status = handleHealthTool(context(), {});
     expect(status).toMatchObject({
       status: "degraded",
-      explanation: "2 of the last 20 turns in the current session used fallback mode.",
+      explanation: "2 of the last 20 workspace turns used fallback mode.",
     });
   });
 
@@ -114,7 +114,7 @@ describe("Health tool handler", () => {
     const status = handleHealthTool(context(), {});
     expect(status).toMatchObject({
       status: "degraded",
-      explanation: "1 of the last 10 turns in the current session used fallback mode.",
+      explanation: "1 of the last 10 workspace turns used fallback mode.",
     });
   });
   
@@ -130,7 +130,7 @@ describe("Health tool handler", () => {
     const status = handleHealthTool(context(), {});
     expect(status).toMatchObject({
       status: "ok",
-      explanation: "0 of the last 20 turns in the current session used fallback mode.",
+      explanation: "0 of the last 20 workspace turns used fallback mode.",
     });
   });
 });

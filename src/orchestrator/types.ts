@@ -97,6 +97,7 @@ export type MutatedRequest = {
   prefix_hash: string;
   middle_hash: string | null;
   signals: string[];
+  keepalive_pings_since_last_turn?: number;
 };
 
 export type { Classification };

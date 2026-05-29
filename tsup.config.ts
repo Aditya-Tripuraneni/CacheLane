@@ -7,6 +7,7 @@ export default defineConfig({
   format: ["esm", "cjs"],
   dts: true,
   clean: true,
+  shims: true,
   target: "node20",
   async onSuccess() {
     const srcDir = path.join("src", "storage", "migrations");

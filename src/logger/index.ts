@@ -81,7 +81,7 @@ export class Logger {
     }
   }
 
-  public log(level: LogLevel, event: string, message: string, error?: unknown, extras?: Record<string, unknown>) {
+  public log(level: LogLevel, event: string, message: string, error?: unknown) {
     if (this.initializationFailed || LEVELS[level] < this.minLevel) {
       return;
     }
@@ -93,7 +93,6 @@ export class Logger {
       session_id: this.sessionId,
       event,
       message,
-      ...extras,
     };
 
     if (level === 'error' && error instanceof Error) {
@@ -123,20 +122,20 @@ export class Logger {
     }
   }
 
-  public debug(event: string, message: string, extras?: Record<string, unknown>) {
-    this.log('debug', event, message, undefined, extras);
+  public debug(event: string, message: string) {
+    this.log('debug', event, message);
   }
 
-  public info(event: string, message: string, extras?: Record<string, unknown>) {
-    this.log('info', event, message, undefined, extras);
+  public info(event: string, message: string) {
+    this.log('info', event, message);
   }
 
-  public warn(event: string, message: string, extras?: Record<string, unknown>) {
-    this.log('warn', event, message, undefined, extras);
+  public warn(event: string, message: string) {
+    this.log('warn', event, message);
   }
 
-  public error(event: string, message: string, error?: unknown, extras?: Record<string, unknown>) {
-    this.log('error', event, message, error, extras);
+  public error(event: string, message: string, error?: unknown) {
+    this.log('error', event, message, error);
   }
 }
 

@@ -123,6 +123,7 @@ describe("KeepaliveWorker", () => {
     const updated = tracker.get("ws-1", "s-1");
     expect(updated?.last_read_at_ms).toBe(260_000);
     expect(updated?.expected_expiry_ms).toBe(560_000);
+    expect(updated?.keepalive_pings_since_last_turn).toBe(1);
   });
 
   it("logs ping failures without throwing or updating expiry", async () => {

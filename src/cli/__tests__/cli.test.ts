@@ -224,6 +224,63 @@ describe("cachelane CLI", () => {
     ]);
   });
 
+  it("debug pruner returns recent pruner log entries as parseable JSON", async () => {
+    const logPath = path.join(env.CACHELANE_HOME!, "cachelane.log");
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.writeFileSync(
+      logPath,
+      [
+        JSON.stringify({
+          ts: "2026-05-27T10:00:00.000Z",
+          level: "info",
+          pid: 1,
+          session_id: "unknown",
+          event: "incoming",
+          message: "{}",
+        }),
+        JSON.stringify({
+          ts: "2026-05-27T10:00:01.000Z",
+          level: "info",
+          pid: 1,
+          session_id: "unknown",
+          event: "pruner debug",
+          message: JSON.stringify({
+            session_id: "sess-1",
+            turn: 4,
+            k: 3,
+            decisions: 1,
+            placements: 1,
+            actionable: 1,
+          }),
+        }),
+        JSON.stringify({
+          ts: "2026-05-27T10:00:02.000Z",
+          level: "info",
+          pid: 1,
+          session_id: "unknown",
+          event: "pruner debug",
+          message: JSON.stringify({
+            session_id: "sess-1",
+            turn: 5,
+            k: 3,
+            decisions: 0,
+            placements: 2,
+            actionable: 0,
+          }),
+        }),
+      ].join("\n"),
+    );
+
+    const output = await run(["debug", "pruner", "--limit", "1"]);
+    expect(JSON.parse(output)).toEqual([
+      expect.objectContaining({
+        session_id: "sess-1",
+        turn: 5,
+        actionable: 0,
+      }),
+    ]);
+  });
+
   it("install is idempotent against temp-home Claude fixtures", async () => {
     fs.mkdirSync(env.CLAUDE_HOME!, { recursive: true });
     fs.writeFileSync(

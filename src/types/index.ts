@@ -46,6 +46,7 @@ export interface PrefixState {
   cached_at_ms: number;
   last_read_at_ms: number;
   expected_expiry_ms: number;
+  keepalive_pings_since_last_turn?: number;
 }
 
 export interface CachelaneConfig {
@@ -77,6 +78,7 @@ export interface CachelaneConfig {
     upstream_host: string;
     upstream_port: number;
     upstream_ssl: boolean;
+    upstream_path_prefix: string;
   };
   features: {
     auto_proxy: boolean;

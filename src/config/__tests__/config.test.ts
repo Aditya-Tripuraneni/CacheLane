@@ -33,6 +33,8 @@ describe("loadConfig", () => {
     expect(config.classification.exclude).toEqual([]);
     expect(config.telemetry.opt_in).toBe(false);
     expect(config.telemetry.endpoint).toBe("");
+    expect(config.proxy.upstream_host).toBe("api.anthropic.com");
+    expect(config.proxy.upstream_path_prefix).toBe("");
     expect(config.logging.level).toBe("info");
     expect(fs.existsSync(configPath)).toBe(true);
   });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CacheStateTracker } from "../cache-state-tracker.js";
 import type { PrefixState } from "../types.js";
+import type { CachelaneDb } from "../../storage/index.js";
 
 function makeState(workspace_id: string, suffix: string): PrefixState {
   return {
@@ -89,7 +90,7 @@ describe("CacheStateTracker", () => {
     };
 
     const t = new CacheStateTracker();
-    t.fromDb(mockDb as any);
+    t.fromDb(mockDb as unknown as CachelaneDb);
 
     expect(t.get("ws-1", "s-1")).toMatchObject({
       prefix_hash: "prefix-a",

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 import { z } from "zod";
 import { CURRENT_CONFIG_VERSION, DEFAULT_CONFIG } from "./defaults.js";
 import type { CachelaneConfig } from "../types/index.js";
@@ -36,6 +37,7 @@ const configSchema = z.object({
       upstream_host: z.string(),
       upstream_port: z.number().int().positive(),
       upstream_ssl: z.boolean(),
+      upstream_path_prefix: z.string().default(""),
     })
     .default(DEFAULT_CONFIG.proxy),
   features: z
@@ -98,4 +100,11 @@ export function loadConfig(configPath: string): CachelaneConfig {
     );
     return { ...DEFAULT_CONFIG };
   }
+}
+
+export function defaultWorkspaceId(): string {
+  const cwd = process.cwd();
+  const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
+  const base = path.basename(cwd).toLowerCase().replace(/[^a-z0-9_-]/g, "");
+  return `ws_${base ? base + "_" : ""}${hash}`;
 }

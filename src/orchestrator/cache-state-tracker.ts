@@ -52,6 +52,7 @@ export class CacheStateTracker {
         cached_at_ms: turn.created_at,
         last_read_at_ms: turn.created_at,
         expected_expiry_ms: turn.created_at + (ttlClass === "1h" ? 60 * 60 * 1000 : 5 * 60 * 1000),
+        keepalive_pings_since_last_turn: 0,
       });
     }
   }

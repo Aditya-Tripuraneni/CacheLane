@@ -83,6 +83,7 @@ describe("pruneExpiredBlocks", () => {
       workspace_id: "ws-1",
       session_id: "sess-1",
       k: 3,
+      current_turn: 4,
       now_ms: 1_715_000_004_000,
     });
 
@@ -114,6 +115,7 @@ describe("pruneExpiredBlocks", () => {
       workspace_id: "ws-1",
       session_id: "sess-1",
       k: 3,
+      current_turn: 4,
       now_ms: 1_715_000_004_000,
     });
 
@@ -128,6 +130,7 @@ describe("pruneExpiredBlocks", () => {
       workspace_id: "ws-1",
       session_id: "sess-1",
       k: 3,
+      current_turn: 4,
       enabled: false,
       now_ms: 1_715_000_004_000,
     });
@@ -147,7 +150,7 @@ describe("pruneExpiredBlocks", () => {
     };
 
     expect(formatStubText(decision)).toBe(
-      "[stub:01KPRUNE] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane:expand(block_id=01KPRUNE)",
+      "[stub:01KPRUNE] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KPRUNE)",
     );
   });
 });
@@ -204,7 +207,7 @@ describe("materializePrunedBlocks", () => {
     expect(out.messages[0]?.content[0]).toEqual({ type: "text", text: "keep-0" });
     expect(out.messages[0]?.content[1]).toEqual({
       type: "text",
-      text: "[stub:01KMATRL] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane:expand(block_id=01KMATRL)",
+      text: "[stub:01KMATRL] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KMATRL)",
     });
     expect(out.messages[1]?.content[0]).toEqual({ type: "text", text: "keep-1" });
     expect(request.messages[0]?.content[1]).toEqual({

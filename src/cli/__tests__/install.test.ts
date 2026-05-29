@@ -23,6 +23,12 @@ function readSettings(): JsonObject {
   return JSON.parse(fs.readFileSync(settingsPath, "utf-8")) as JsonObject;
 }
 
+function readCachelaneConfig(): JsonObject {
+  return JSON.parse(
+    fs.readFileSync(path.join(env.CACHELANE_HOME!, "config.json"), "utf-8"),
+  ) as JsonObject;
+}
+
 function writeSettings(value: JsonObject): void {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, `${JSON.stringify(value, null, 2)}\n`);
@@ -76,24 +82,20 @@ describe("mergeBaseUrlIntoSettings", () => {
     // Force a measurable mtime gap before re-running.
     const stale = mtimeBefore - 5000;
     fs.utimesSync(settingsPath, stale / 1000, stale / 1000);
+    const staleAfterUtimes = fs.statSync(settingsPath).mtimeMs;
 
     const changed = mergeBaseUrlIntoSettings(settingsPath, EXPECTED_PORT);
 
     expect(changed).toBe(false);
-    expect(fs.statSync(settingsPath).mtimeMs).toBe(stale);
+    expect(fs.statSync(settingsPath).mtimeMs).toBe(staleAfterUtimes);
   });
 });
 
 describe("validateInstall", () => {
-  it("throws with an actionable message when settings.json has a different ANTHROPIC_BASE_URL", () => {
+  it("does not throw when settings.json has a different ANTHROPIC_BASE_URL (preserves for custom upstreams)", () => {
     writeSettings({ env: { ANTHROPIC_BASE_URL: "http://example.com:9999" } });
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(
-      /http:\/\/example\.com:9999/,
-    );
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(
-      /cachelane config set proxy\.port/i,
-    );
+    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).not.toThrow();
   });
 
   it("throws when settings.json is malformed JSON", () => {
@@ -113,10 +115,12 @@ describe("validateInstall", () => {
   });
 
   it("does not modify settings.json on validation failure", () => {
-    writeSettings({ env: { ANTHROPIC_BASE_URL: "http://example.com:9999" } });
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    // Write invalid JSON
+    fs.writeFileSync(settingsPath, "{malformed");
     const before = fs.readFileSync(settingsPath, "utf-8");
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow();
+    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(/Invalid JSON/);
 
     expect(fs.readFileSync(settingsPath, "utf-8")).toBe(before);
   });
@@ -165,14 +169,27 @@ describe("installCachelane / uninstallCachelane URL wiring", () => {
     expect(settings.env.ANTHROPIC_BASE_URL).toBe(EXPECTED_URL);
   });
 
-  it("install aborts before any writes when settings.json has a conflicting URL", () => {
-    writeSettings({ env: { ANTHROPIC_BASE_URL: "http://example.com:9999" } });
-    const mcpPath = path.join(env.CLAUDE_HOME!, "mcp.json");
+  it("install rewrites a conflicting URL to the local proxy and stores the old URL as upstream", () => {
+    writeSettings({ env: { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" } });
 
-    expect(() => installCachelane(env)).toThrow(/http:\/\/example\.com:9999/);
+    // Should not throw, should perform writes successfully.
+    installCachelane(env);
 
-    // MCP file must not have been written.
-    expect(fs.existsSync(mcpPath)).toBe(false);
+    const settings = readSettings() as { env: { ANTHROPIC_BASE_URL: string } };
+    expect(settings.env.ANTHROPIC_BASE_URL).toBe(EXPECTED_URL);
+
+    const config = readCachelaneConfig() as {
+      proxy: {
+        upstream_host: string;
+        upstream_port: number;
+        upstream_ssl: boolean;
+        upstream_path_prefix: string;
+      };
+    };
+    expect(config.proxy.upstream_host).toBe("api.z.ai");
+    expect(config.proxy.upstream_port).toBe(443);
+    expect(config.proxy.upstream_ssl).toBe(true);
+    expect(config.proxy.upstream_path_prefix).toBe("/api/anthropic");
   });
 
   it("uninstall removes ANTHROPIC_BASE_URL", () => {

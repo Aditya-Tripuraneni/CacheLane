@@ -8,5 +8,5 @@ export function makeStubSummary(row: BlockRow): string {
 
 export function formatStubText(decision: PruneDecision): string {
   const shortId = decision.block_id.slice(0, 8);
-  return `[stub:${shortId}] ${decision.stub_summary} | refetch via cachelane:expand(block_id=${shortId})`;
+  return `[stub:${shortId}] ${decision.stub_summary} | refetch via cachelane_expand(block_id=${shortId})`;
 }

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+
 import {
   cachelaneConfigPath,
   cachelaneDbPath,
@@ -10,6 +10,7 @@ import {
   claudeMcpPath,
 } from "./paths.js";
 import { loadConfig } from "../config/index.js";
+import type { CachelaneConfig } from "../types/index.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -74,22 +75,43 @@ function baseUrlFor(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
 
-// Throws (without modifying any files) if settings.json already pins
-// ANTHROPIC_BASE_URL to something other than our intended URL. Propagates the
-// existing readJsonObject error path for malformed JSON.
+function isLocalProxyUrl(value: string, port: number): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost") &&
+      Number(url.port || (url.protocol === "https:" ? 443 : 80)) === port
+    );
+  } catch {
+    return false;
+  }
+}
+
+function upstreamFromBaseUrl(value: unknown, port: number): Partial<CachelaneConfig["proxy"]> | null {
+  if (typeof value !== "string") return null;
+  if (isLocalProxyUrl(value, port)) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return {
+      upstream_host: url.hostname,
+      upstream_port: Number(url.port || (url.protocol === "https:" ? 443 : 80)),
+      upstream_ssl: url.protocol === "https:",
+      upstream_path_prefix: url.pathname && url.pathname !== "/" ? url.pathname.replace(/\/+$/, "") : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function validateInstall(settingsPath: string, intendedPort: number): void {
+  // We still parse to ensure it's valid JSON and structurally sound.
   const settings = readJsonObject(settingsPath);
   assertEnvIsObjectOrAbsent(settings, settingsPath);
-  if (!isObject(settings.env)) return;
-  const existing = (settings.env as JsonObject).ANTHROPIC_BASE_URL;
-  if (typeof existing !== "string") return;
-  const intended = baseUrlFor(intendedPort);
-  if (existing === intended) return;
-  throw new Error(
-    `Cannot install: ${settingsPath} already pins ANTHROPIC_BASE_URL to "${existing}" ` +
-      `(CacheLane wants "${intended}"). To resolve, either remove the conflicting entry ` +
-      `or run \`cachelane config set proxy.port <port>\` so CacheLane matches the existing URL.`,
-  );
+  
+  // Allow overriding ANTHROPIC_BASE_URL for custom upstreams (e.g. GLM).
+  // We will preserve the path during merge instead of throwing here.
 }
 
 // Idempotent merge — returns true iff the file was modified.
@@ -98,10 +120,33 @@ export function mergeBaseUrlIntoSettings(settingsPath: string, port: number): bo
   assertEnvIsObjectOrAbsent(settings, settingsPath);
   const env: JsonObject = isObject(settings.env) ? { ...(settings.env as JsonObject) } : {};
   const intended = baseUrlFor(port);
+
   if (env.ANTHROPIC_BASE_URL === intended) return false;
   env.ANTHROPIC_BASE_URL = intended;
   settings.env = env;
   writeJsonObject(settingsPath, settings);
+  return true;
+}
+
+function mergeUpstreamFromSettingsIntoConfig(
+  settingsPath: string,
+  configPath: string,
+  config: CachelaneConfig,
+): boolean {
+  const settings = readJsonObject(settingsPath);
+  assertEnvIsObjectOrAbsent(settings, settingsPath);
+  const env = isObject(settings.env) ? settings.env : {};
+  const upstream = upstreamFromBaseUrl(env.ANTHROPIC_BASE_URL, config.proxy.port);
+  if (upstream === null) return false;
+
+  const rawConfig = readJsonObject(configPath);
+  const nextConfig: JsonObject = { ...rawConfig };
+  const existingProxy = isObject(nextConfig.proxy) ? nextConfig.proxy : {};
+  const nextProxy: JsonObject = { ...config.proxy, ...existingProxy, ...upstream };
+  nextConfig.proxy = nextProxy;
+
+  if (stable(rawConfig) === stable(nextConfig)) return false;
+  writeJsonObject(configPath, nextConfig);
   return true;
 }
 
@@ -219,12 +264,31 @@ export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallR
   // ── Validate BEFORE any mutation — fail-open guarantees no partial writes.
   validateInstall(settingsPath, config.proxy.port);
 
-  // ── MCP server ──────────────────────────────────────────────────────────────
+  const nodeExec = (() => { try { return fs.realpathSync(process.execPath); } catch { return process.execPath; } })();
+  const cliScript = (() => {
+    const argv1 = process.argv[1];
+    if (argv1 && (argv1.endsWith("index.js") || argv1.endsWith("index.cjs") || argv1.endsWith("cachelane"))) {
+      try {
+        return fs.realpathSync(argv1);
+      } catch {
+        return argv1;
+      }
+    }
+    const candidates = [
+      path.join(__dirname, "index.js"),
+      path.join(__dirname, "cli", "index.js"),
+    ];
+    for (const c of candidates) {
+      if (fs.existsSync(c)) return c;
+    }
+    return candidates[0]!;
+  })();
+
   const mcpConfig = readJsonObject(mcpPath);
   const servers = isObject(mcpConfig.mcpServers) ? mcpConfig.mcpServers : {};
   const nextServer = {
-    command: "cachelane",
-    args: ["mcp"],
+    command: nodeExec,
+    args: [cliScript, "mcp"],
     env: { CACHELANE_HOME: cachelaneHome(env) },
   };
   const beforeMcp = stable(mcpConfig);
@@ -242,11 +306,10 @@ export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallR
   //
   // Use absolute paths for node + script because hook subprocesses don't inherit
   // the user's shell PATH (e.g. fnm multishell paths are session-specific).
-  const nodeExec = (() => { try { return fs.realpathSync(process.execPath); } catch { return process.execPath; } })();
-  const cliScript = fileURLToPath(new URL("./index.js", import.meta.url));
   const hookCmd = (name: string) => `"${nodeExec}" "${cliScript}" hook ${name}`;
 
   const settingsChanged = mergeHooksIntoSettings(settingsPath, hookCmd);
+  const upstreamChanged = mergeUpstreamFromSettingsIntoConfig(settingsPath, configPath, config);
   const urlChanged = mergeBaseUrlIntoSettings(settingsPath, config.proxy.port);
 
   // Marker file — used by `cachelane doctor` to confirm hooks are registered
@@ -267,6 +330,7 @@ export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallR
     changed:
       beforeMcp !== afterMcp ||
       settingsChanged ||
+      upstreamChanged ||
       urlChanged ||
       beforeMarker !== markerContent,
   };

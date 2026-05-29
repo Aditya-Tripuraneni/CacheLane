@@ -3,7 +3,7 @@ import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { openDatabase, type CachelaneDb } from "../storage/index.js";
-import { loadConfig } from "../config/index.js";
+import { loadConfig, defaultWorkspaceId } from "../config/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
 import { tryBindProxy, type ProxyLifecycle } from "../proxy/lifecycle.js";
 import { KeepaliveWorker, type KeepalivePingExecutor } from "../keepalive/index.js";
@@ -60,7 +60,7 @@ export function createCachelaneMcpServer(
   });
 
   server.registerTool(
-    "cachelane:stats",
+    "cachelane_stats",
     {
       title: "CacheLane Stats",
       description: "Return cache, pruning, keepalive, and cost-unit aggregates.",
@@ -70,7 +70,7 @@ export function createCachelaneMcpServer(
   );
 
   server.registerTool(
-    "cachelane:explain",
+    "cachelane_explain",
     {
       title: "CacheLane Explain",
       description: "Return metadata-only explanation for the latest or requested turn.",
@@ -80,7 +80,7 @@ export function createCachelaneMcpServer(
   );
 
   server.registerTool(
-    "cachelane:expand",
+    "cachelane_expand",
     {
       title: "CacheLane Expand",
       description: "Return trusted refetch metadata for a stubbed block.",
@@ -90,7 +90,7 @@ export function createCachelaneMcpServer(
   );
 
   server.registerTool(
-    "cachelane:health",
+    "cachelane_health",
     {
       title: "CacheLane Health",
       description: "Return health status and degraded fallback metrics.",
@@ -112,13 +112,14 @@ function inTestEnvironment(): boolean {
   return process.env.VITEST === "true" || process.env.NODE_ENV === "test";
 }
 
+
 export async function startCachelaneStdioServer(
   options: StartCachelaneStdioServerOptions = {},
 ): Promise<void> {
   const dbPath = options.db_path ?? defaultCachelaneDbPath();
   const configPath = options.config_path ?? defaultCachelaneConfigPath();
   const workspaceId =
-    options.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
+    options.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
   const sessionId =
     options.session_id ?? process.env.CACHELANE_SESSION_ID ?? "default";
 
@@ -143,6 +144,7 @@ export async function startCachelaneStdioServer(
           host: config.proxy.upstream_host,
           port: config.proxy.upstream_port,
           ssl: config.proxy.upstream_ssl,
+          path_prefix: config.proxy.upstream_path_prefix,
         },
         drain_timeout_ms: config.proxy.drain_timeout_ms,
       },
@@ -154,7 +156,7 @@ export async function startCachelaneStdioServer(
         "[cachelane] continuing in MCP-only mode (proxy bind failed)",
       );
     } else {
-      console.info(
+      console.error(
         `[cachelane] proxy listening on http://127.0.0.1:${lifecycle.port}`,
       );
 
@@ -166,7 +168,7 @@ export async function startCachelaneStdioServer(
         // make an Anthropic API call with a synthetic prompt matching the cache.
         // For Gate 5, we wire the worker; full executor logic is deferred/stubbed.
         const executor: KeepalivePingExecutor = async (req) => {
-          console.info(`[cachelane] keepalive ping stub for ${req.workspace_id}:${req.session_id}`);
+          console.error(`[cachelane] keepalive ping stub for ${req.workspace_id}:${req.session_id}`);
           return { ok: true };
         };
 

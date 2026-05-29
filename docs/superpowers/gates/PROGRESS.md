@@ -14,7 +14,7 @@
 | G4: Fail-Open Observability | done | `gate-4-done` (65e3f47) | user (2026-05-24) |
 | G5: Session Resume + Keepalive | done | `gate-5-done` (5569606) | auto (2026-05-24) |
 | G6: Multi-Window Session ID | done | `gate-6-done` (f3d991a) | auto (2026-05-24) |
-| G7: Baseline A/B + Acceptance Suite | done | `gate-7-done` (0653291) | auto (2026-05-24) |
+| G7: Baseline A/B + Acceptance Suite | in-progress | — | — |
 
 ## Status values
 - `pending` — not yet started

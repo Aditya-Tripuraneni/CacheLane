@@ -17,6 +17,7 @@ import {
   type CacheStateTracker,
   type MutatedRequest,
 } from "../orchestrator/index.js";
+import { logger } from "../logger/index.js";
 
 export interface PreRequestInput {
   db: CachelaneDb;
@@ -48,6 +49,7 @@ function fallbackResult(input: PreRequestInput): PreRequestResult {
     pruned_blocks_count: 0,
     prune_decisions: [],
     effective_message_classifications: input.message_classifications,
+    keepalive_pings_since_last_turn: 0,
   };
 }
 
@@ -164,6 +166,12 @@ function recordExplanation(
   }
 }
 
+function recordAndReturnFallback(input: PreRequestInput): PreRequestResult {
+  const result = fallbackResult(input);
+  recordExplanation(input, result);
+  return result;
+}
+
 export function handlePreRequest(input: PreRequestInput): PreRequestResult {
   try {
     if (
@@ -180,13 +188,14 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
           messages: input.original_request.messages.length,
         }
       );
-      return fallbackResult(input);
+      return recordAndReturnFallback(input);
     }
 
     const pruneResult = pruneExpiredBlocks(input.db, {
       workspace_id: input.workspace_id,
       session_id: input.session_id,
       k: input.pruner.k,
+      current_turn: input.current_turn,
       enabled: input.pruner.enabled,
       now_ms: input.now_ms,
     });
@@ -200,6 +209,20 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
     const actionableDecisions = pruneResult.decisions.filter((d) =>
       placementIds.has(d.block_id),
     );
+
+    // DEBUG: log pruner decision details to diagnose pruned_blocks_count=0
+    if (pruneResult.decisions.length > 0 || input.block_placements.length > 0) {
+      logger.info("pruner debug", JSON.stringify({
+        session_id: input.session_id,
+        turn: input.current_turn,
+        k: input.pruner.k,
+        decisions: pruneResult.decisions.length,
+        placements: input.block_placements.length,
+        placementIds: [...placementIds].slice(0, 5),
+        decisionIds: pruneResult.decisions.slice(0, 5).map(d => d.block_id),
+        actionable: actionableDecisions.length,
+      }));
+    }
 
     const requestWithStubs =
       actionableDecisions.length === 0
@@ -234,10 +257,9 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
     recordExplanation(input, result);
     return result;
   } catch (err) {
-    console.error(
-      "[cachelane] pre-request: pipeline error — failing open",
-      err instanceof Error ? err.message : String(err),
-    );
-    return fallbackResult(input);
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[cachelane] pre-request: pipeline error — failing open", errMsg);
+    logger.error("pre-request pipeline error", errMsg, err);
+    return recordAndReturnFallback(input);
   }
 }

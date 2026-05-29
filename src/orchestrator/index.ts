@@ -58,6 +58,8 @@ export function orchestrate(
   try {
     const boundaries = findRegionBoundaries(input.message_classifications);
     const prevState = tracker.get(input.workspace_id, input.session_id);
+    const keepalivePings = prevState?.keepalive_pings_since_last_turn ?? 0;
+
     const breakpoints = placeBreakpoints(
       input.original_request,
       boundaries,
@@ -82,6 +84,7 @@ export function orchestrate(
       cached_at_ms: now,
       last_read_at_ms: now,
       expected_expiry_ms: now + TTL_MS[ttlClass],
+      keepalive_pings_since_last_turn: 0,
     });
 
     const didMutate =
@@ -92,7 +95,7 @@ export function orchestrate(
       ? ["prefix_cached", "middle_cached"]
       : ["prefix_cached"];
 
-    console.info("[cachelane] orchestrate", {
+    console.error("[cachelane] orchestrate", {
       prefix_changed: prevState?.prefix_hash !== breakpoints.prefix_hash,
       ttl_class: ttlClass,
       signals,
@@ -105,6 +108,7 @@ export function orchestrate(
       prefix_hash: breakpoints.prefix_hash,
       middle_hash: breakpoints.middle_hash,
       signals,
+      keepalive_pings_since_last_turn: keepalivePings,
     };
   } catch (err) {
     // Fail-open: never let an orchestration error block the model call.

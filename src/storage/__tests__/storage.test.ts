@@ -56,6 +56,14 @@ describe("openDatabase", () => {
     expect(tables.map((table) => table.name)).toContain("turn_explanations");
   });
 
+  it("applies turn_counters migration", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const tables = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+      .all() as { name: string }[];
+    expect(tables.map((table) => table.name)).toContain("turn_counters");
+  });
+
   it("applies all six spec indexes by exact name", () => {
     db = openDatabase(path.join(tmpDir, "test.db"));
     const indexes = db
@@ -219,6 +227,42 @@ describe("openDatabase", () => {
     expect(turn!.cache_read_tokens).toBe(500);
     expect(turn!.output_tokens).toBe(80);
     expect(turn!.effective_cost_units).toBeCloseTo(1500, 5);
+  });
+
+  it("allocateTurnNumber returns monotonic numbers scoped by workspace and session", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+
+    expect(db.allocateTurnNumber({ workspace_id: "ws-1", session_id: "sess-1" })).toBe(1);
+    expect(db.allocateTurnNumber({ workspace_id: "ws-1", session_id: "sess-1" })).toBe(2);
+    expect(db.allocateTurnNumber({ workspace_id: "ws-1", session_id: "sess-2" })).toBe(1);
+    expect(db.allocateTurnNumber({ workspace_id: "ws-2", session_id: "sess-1" })).toBe(1);
+  });
+
+  it("allocateTurnNumber seeds from existing turns when a counter is absent", () => {
+    db = openDatabase(path.join(tmpDir, "test.db"));
+    const now = Date.now();
+
+    db.insertTurn({
+      id: "turn-existing-3",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      turn_number: 3,
+      model: "claude-opus-4-7",
+      input_tokens: 100,
+      output_tokens: 0,
+      cache_creation_5m_tokens: 0,
+      cache_creation_1h_tokens: 0,
+      cache_read_tokens: 0,
+      effective_cost_units: 100,
+      prefix_breakpoint_hash: null,
+      middle_breakpoint_hash: null,
+      pruned_blocks_count: 0,
+      keepalive_pings_since_last_turn: 0,
+      created_at: now,
+    });
+
+    expect(db.allocateTurnNumber({ workspace_id: "ws-1", session_id: "sess-1" })).toBe(4);
+    expect(db.allocateTurnNumber({ workspace_id: "ws-1", session_id: "sess-1" })).toBe(5);
   });
 
   it("insertTurnExplanation round-trips metadata without content fields", () => {
@@ -753,6 +797,7 @@ describe("openDatabase", () => {
       workspace_id: "ws-1",
       session_id: "sess-1",
       k: 3,
+      current_turn: 4,
     });
 
     expect(rows.map((row) => row.id)).toEqual(["01PRUNABLE000000000001"]);

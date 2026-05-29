@@ -1,12 +1,24 @@
 import Database from "better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-export const MIGRATION_DIR = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "migrations"
-);
+// tsup bundles storage code into both dist/index.cjs (__dirname=dist/) and
+// dist/cli/index.cjs (__dirname=dist/cli/). The migrations folder is always
+// copied to dist/migrations/ by the tsup onSuccess hook, so we check both
+// possible relative locations.
+function findMigrationDir(): string {
+  const candidates = [
+    path.join(__dirname, "migrations"),
+    path.join(__dirname, "..", "migrations"),
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(dir)) return dir;
+  }
+  // Fallback — will error later with a clear ENOENT if missing
+  return candidates[0]!;
+}
+
+export const MIGRATION_DIR = findMigrationDir();
 
 export function applyMigrations(db: Database.Database): void {
   db.exec(`

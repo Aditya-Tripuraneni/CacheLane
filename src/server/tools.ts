@@ -9,7 +9,7 @@ import { expandCachedStub } from "../hooks/expand.js";
 import type { ExpandStubResult } from "../hooks/expand.js";
 
 export const statsInputSchema = z.object({
-  scope: z.enum(["session", "workspace", "all"]).optional().default("session"),
+  scope: z.enum(["session", "workspace", "all"]).optional().default("workspace"),
   since: z.string().optional(),
 });
 
@@ -73,12 +73,22 @@ export function handleStatsTool(
 ): CachelaneStats {
   const input = statsInputSchema.parse(rawInput);
   const scope = input.scope as StatsScope;
+  const targetSessionId =
+    scope === "session" ? resolveSessionId(context) : context.session_id;
+
   return context.db.getStats({
     scope,
     workspace_id: scope === "all" ? undefined : context.workspace_id,
-    session_id: scope === "session" ? context.session_id : undefined,
+    session_id: scope === "session" ? targetSessionId : undefined,
     since_ms: parseSince(input.since, context.now_ms),
   });
+}
+
+function resolveSessionId(context: CachelaneMcpContext): string {
+  if (context.session_id !== "default") return context.session_id;
+
+  const recent = context.db.getRecentTurn({ workspace_id: context.workspace_id });
+  return recent?.session_id ?? context.session_id;
 }
 
 export function handleExplainTool(
@@ -86,9 +96,10 @@ export function handleExplainTool(
   rawInput: ExplainToolInput,
 ): { found: false } | { found: true; explanation: TurnExplanationRecord } {
   const input = explainInputSchema.parse(rawInput);
+  const targetSessionId = resolveSessionId(context);
   const explanation = context.db.getTurnExplanation({
     workspace_id: context.workspace_id,
-    session_id: context.session_id,
+    session_id: targetSessionId,
     turn_number: input.turn,
   });
 
@@ -106,12 +117,11 @@ export function handleExpandTool(
   const input = expandInputSchema.parse(rawInput);
   const recent = context.db.getRecentTurn({
     workspace_id: context.workspace_id,
-    session_id: context.session_id,
   });
 
   return expandCachedStub(context.db, {
     workspace_id: context.workspace_id,
-    session_id: context.session_id,
+    session_id: recent?.session_id ?? context.session_id,
     block_id: input.block_id,
     turn_number: (recent?.turn_number ?? 0) + 1,
     updated_at: context.now_ms,

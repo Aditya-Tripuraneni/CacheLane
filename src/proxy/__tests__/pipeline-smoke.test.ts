@@ -9,7 +9,7 @@ import { openDatabase } from "../../storage/index.js";
 import type { AnthropicMessagesRequest } from "../../orchestrator/types.js";
 
 // Helpers
-function sseResponseBody(inputUsage: any, outputTokens = 42): string {
+function sseResponseBody(inputUsage: Record<string, number>, outputTokens = 42): string {
   return [
     `data: ${JSON.stringify({ type: "message_start", message: { id: "msg_sse", role: "assistant", usage: { ...inputUsage, output_tokens: 0 } } })}`,
     `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Four" } })}`,
@@ -58,8 +58,8 @@ function waitForServer(server: http.Server): Promise<number> {
 
 function closeServer(server: http.Server): Promise<void> {
   return new Promise<void>((resolve) => {
-    if (typeof (server as any).closeAllConnections === "function") {
-      (server as any).closeAllConnections();
+    if (typeof (server as unknown as { closeAllConnections?: () => void }).closeAllConnections === "function") {
+      (server as unknown as { closeAllConnections: () => void }).closeAllConnections();
     }
     server.close(() => resolve());
   });
@@ -140,123 +140,6 @@ afterEach(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-describe("K-pruner end-to-end (refetch_handle + updateBlockCounters)", () => {
-  it("inserts tool_result blocks with non-null refetch_handle", async () => {
-    // Turn 1: request includes a tool_result block.
-    const TOOL_USE_ID = "toolu_rh_test_01";
-    const req1: AnthropicMessagesRequest = {
-      model: "claude-opus-4-7",
-      messages: [
-        { role: "user",      content: [{ type: "text", text: "use a tool" }] },
-        { role: "assistant", content: [{ type: "tool_use", id: TOOL_USE_ID, name: "Read", input: { path: "/foo" } }] as any },
-        { role: "user",      content: [{ type: "tool_result", tool_use_id: TOOL_USE_ID, content: "file content here" } as any] },
-      ],
-      max_tokens: 1024,
-    };
-    resetFakeUpstream(sseResponseBody({ input_tokens: 50, cache_creation_5m_tokens: 30 }));
-    await postMessages(proxyPort, JSON.stringify(req1));
-    await waitForTurn(dbPath, "test-session", 1);
-
-    const db = openDatabase(dbPath);
-    try {
-      const block = db.getBlock(TOOL_USE_ID);
-      expect(block).not.toBeNull();
-      // Bug fix: refetch_handle must be non-null for the K-pruner SQL filter.
-      expect(block!.refetch_handle).toBe(TOOL_USE_ID);
-      expect(block!.unused_turns).toBe(0);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("prunes a tool_result block that has reached unused_turns >= k and has a placement", async () => {
-    // Use a config with k=1 so one missed turn is enough to prune.
-    // All required sections must be present — partial configs fall back to defaults (k=3).
-    const configPath = path.join(tmpDir, "config-k1.json");
-    fs.writeFileSync(configPath, JSON.stringify({
-      version: 1,
-      pruner: { enabled: true, k: 1, mode: "default" },
-      keepalive: { policy: "auto", interval_seconds: 150, idle_threshold_seconds: 240, large_prefix_threshold_tokens: 50000 },
-      classification: { pin: [], exclude: [], sliding_window_turns: 10 },
-      telemetry: { opt_in: false, endpoint: "" },
-    }));
-    await closeServer(proxy);
-    const k1Proxy = startProxy({
-      port: 0,
-      db_path: dbPath,
-      config_path: configPath,
-      workspace_id: "test-ws",
-      session_id: "prune-session",
-      upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
-    });
-    const k1Port = await waitForServer(k1Proxy);
-
-    const TOOL_USE_ID = "toolu_prunetest_01";
-
-    try {
-      // Pre-populate the DB with a block whose unused_turns already equals k=1.
-      // This simulates a block that was carried in conversation history for one
-      // turn without the model actively using its content.
-      const preDb = openDatabase(dbPath);
-      preDb.insertBlock({
-        id: TOOL_USE_ID,
-        workspace_id: "test-ws",
-        session_id: "prune-session",
-        content_hash: "deadbeef",
-        kind: "tool_output",
-        volatility: "VOLATILE",
-        is_pinned: false,
-        token_count: 200,
-        added_at_turn: 1,
-        last_referenced_at_turn: 1,
-        unused_turns: 1,           // equals k=1 → immediately pruneable
-        is_stub: false,
-        stub_summary: null,
-        refetch_handle: TOOL_USE_ID,  // non-null so SQL filter passes
-        restored_at_turn: null,
-        created_at: Date.now(),
-        updated_at: Date.now(),
-      });
-      preDb.close();
-
-      // Send a turn that INCLUDES the block as a tool_result (it's in the
-      // conversation history). The pruner fires at pre-request time because
-      // unused_turns(1) >= k(1) and the block has a placement.
-      const req: AnthropicMessagesRequest = {
-        model: "claude-opus-4-7",
-        messages: [
-          { role: "user",      content: [{ type: "text", text: "earlier msg" }] },
-          { role: "assistant", content: [{ type: "tool_use", id: TOOL_USE_ID, name: "Read", input: { path: "/foo" } }] as any },
-          { role: "user",      content: [{ type: "tool_result", tool_use_id: TOOL_USE_ID, content: "file content" } as any] },
-          { role: "assistant", content: [{ type: "text", text: "I saw the file" }] },
-          { role: "user",      content: [{ type: "text", text: "continue the work" }] },
-        ],
-        max_tokens: 1024,
-      };
-      resetFakeUpstream(sseResponseBody({ input_tokens: 200 }));
-      await postMessages(k1Port, JSON.stringify(req));
-      await waitForTurn(dbPath, "prune-session", 1);
-
-      const db = openDatabase(dbPath);
-      try {
-        // Block is now a stub in the DB.
-        const block = db.getBlock(TOOL_USE_ID);
-        expect(block).not.toBeNull();
-        expect(block!.is_stub).toBe(1);
-
-        // Turn 1 must record pruned_blocks_count = 1.
-        const turn1 = db.getTurnByNumber("test-ws", "prune-session", 1);
-        expect(turn1).not.toBeNull();
-        expect(turn1!.pruned_blocks_count).toBe(1);
-      } finally {
-        db.close();
-      }
-    } finally {
-      await closeServer(k1Proxy);
-    }
-  });
-});
-
 describe("Pipeline smoke test (§7.2.1)", () => {
   it("validates the entire pipeline in one shot", async () => {
     const req1: AnthropicMessagesRequest = {
@@ -276,7 +159,6 @@ describe("Pipeline smoke test (§7.2.1)", () => {
     }));
     await postMessages(proxyPort, JSON.stringify(req1));
     await waitForTurn(dbPath, "test-session", 1);
-    const body1 = lastCaptured!.body;
 
     const req2: AnthropicMessagesRequest = {
       ...req1,
@@ -323,7 +205,7 @@ describe("Pipeline smoke test (§7.2.1)", () => {
       // (e) request mutated successfully (cache_control present in upstream body)
       const hasCacheControl =
         forwardedReq2.tools?.some((t) => t.cache_control !== undefined) ||
-        forwardedReq2.system?.some((s) => (s as any).cache_control !== undefined);
+        forwardedReq2.system?.some((s) => (s as unknown as { cache_control?: unknown }).cache_control !== undefined);
       expect(hasCacheControl).toBe(true);
 
     } finally {

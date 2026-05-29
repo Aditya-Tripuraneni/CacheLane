@@ -94,6 +94,12 @@ export interface InsertTurnParams {
   created_at: number;
 }
 
+export interface AllocateTurnNumberParams {
+  workspace_id: string;
+  session_id: string;
+  updated_at?: number;
+}
+
 export interface BlockReferenceRow {
   id: number;
   block_id: string;
@@ -116,6 +122,7 @@ export interface GetPrunableBlocksParams {
   workspace_id: string;
   session_id: string;
   k: number;
+  current_turn: number;
 }
 
 export interface GetBlocksByIdPrefixParams {
@@ -166,6 +173,7 @@ export interface CachelaneDb extends Database.Database {
   ): void;
   markStubs(items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; updatedAt: number }>): void;
   restoreStub(params: RestoreStubParams): void;
+  allocateTurnNumber(params: AllocateTurnNumberParams): number;
   insertTurn(params: InsertTurnParams): void;
   getTurn(id: string): TurnRow | null;
   insertBlockReference(params: InsertBlockReferenceParams): number;
@@ -179,6 +187,7 @@ export interface CachelaneDb extends Database.Database {
   updateTurnUsage(params: UpdateTurnUsageParams): void;
   insertTurnExplanation(params: InsertTurnExplanationParams): void;
   getTurnExplanation(params?: GetTurnExplanationParams): TurnExplanationRecord | null;
+  updateTurnExplanationUsage(turnId: string, usage: TurnExplanationUsage, updatedAt: number): void;
   getRecentTurnExplanations(params: GetRecentTurnExplanationsParams): TurnExplanationRecord[];
   getStats(params: GetStatsParams): CachelaneStats;
 }
@@ -358,4 +367,3 @@ export function calculateEffectiveCostUnits(params: {
     0.1 * params.cache_read_tokens
   );
 }
-

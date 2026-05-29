@@ -9,6 +9,7 @@ import type {
   InsertBlockParams,
   InsertBlockReferenceParams,
   InsertTurnParams,
+  AllocateTurnNumberParams,
   RestoreStubParams,
   TurnRow,
   UpdateBlockCountersParams,
@@ -238,7 +239,14 @@ export function openDatabase(dbPath: string): CachelaneDb {
     SELECT * FROM blocks
     WHERE workspace_id = @workspace_id
       AND session_id = @session_id
-      AND unused_turns >= @k
+      AND (
+        -- Age-based: block has been in context for k+ turns regardless of reference count.
+        -- This fires even when Claude Code sends full history on every turn (unused_turns
+        -- stays 0 because the block is always "present" in the messages array).
+        (@current_turn - added_at_turn) >= @k
+        -- Idle-based: block explicitly absent from recent turns (future / response-based tracking).
+        OR unused_turns >= @k
+      )
       AND is_stub = 0
       AND is_pinned = 0
       AND volatility != 'STABLE'
@@ -255,7 +263,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
   `);
 
   const insertTurnStmt = rawDb.prepare(`
-    INSERT INTO turns
+    INSERT OR IGNORE INTO turns
       (id, workspace_id, session_id, turn_number, model,
        input_tokens, output_tokens,
        cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens,
@@ -267,6 +275,34 @@ export function openDatabase(dbPath: string): CachelaneDb {
        @cache_creation_5m_tokens, @cache_creation_1h_tokens, @cache_read_tokens,
        @effective_cost_units, @prefix_breakpoint_hash, @middle_breakpoint_hash,
        @pruned_blocks_count, @keepalive_pings_since_last_turn, @signals, @request_mutated, @created_at)
+  `);
+
+  const getTurnCounterStmt = rawDb.prepare(`
+    SELECT next_turn_number FROM turn_counters
+    WHERE workspace_id = ?
+      AND session_id = ?
+  `);
+
+  const getNextTurnFromExistingTurnsStmt = rawDb.prepare(`
+    SELECT COALESCE(MAX(turn_number), 0) + 1 AS next_turn_number
+    FROM turns
+    WHERE workspace_id = ?
+      AND session_id = ?
+  `);
+
+  const insertTurnCounterStmt = rawDb.prepare(`
+    INSERT INTO turn_counters
+      (workspace_id, session_id, next_turn_number, updated_at)
+    VALUES
+      (@workspace_id, @session_id, @next_turn_number, @updated_at)
+  `);
+
+  const updateTurnCounterStmt = rawDb.prepare(`
+    UPDATE turn_counters
+    SET next_turn_number = @next_turn_number,
+        updated_at = @updated_at
+    WHERE workspace_id = @workspace_id
+      AND session_id = @session_id
   `);
 
   const getTurnStmt = rawDb.prepare("SELECT * FROM turns WHERE id = ?");
@@ -332,17 +368,14 @@ export function openDatabase(dbPath: string): CachelaneDb {
 
   const updateTurnExplanationUsageStmt = rawDb.prepare(`
     UPDATE turn_explanations
-    SET turn_id = @turn_id,
-        usage_input_tokens = @input_tokens,
+    SET usage_input_tokens = @input_tokens,
         usage_output_tokens = @output_tokens,
         usage_cache_creation_5m_tokens = @cache_creation_5m_tokens,
         usage_cache_creation_1h_tokens = @cache_creation_1h_tokens,
         usage_cache_read_tokens = @cache_read_tokens,
         usage_effective_cost_units = @effective_cost_units,
         updated_at = @updated_at
-    WHERE workspace_id = @workspace_id
-      AND session_id = @session_id
-      AND turn_number = @turn_number
+    WHERE turn_id = @turn_id
   `);
 
   const insertBlockReferenceStmt = rawDb.prepare(`
@@ -420,6 +453,38 @@ export function openDatabase(dbPath: string): CachelaneDb {
   ) as (items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; updatedAt: number }>) => void;
 
   db.restoreStub = (p: RestoreStubParams) => void restoreStubStmt.run(p);
+
+  db.allocateTurnNumber = rawDb.transaction(
+    (p: AllocateTurnNumberParams): number => {
+      const updatedAt = p.updated_at ?? Date.now();
+      const existing = getTurnCounterStmt.get(
+        p.workspace_id,
+        p.session_id,
+      ) as { next_turn_number: number } | undefined;
+
+      if (existing !== undefined) {
+        updateTurnCounterStmt.run({
+          workspace_id: p.workspace_id,
+          session_id: p.session_id,
+          next_turn_number: existing.next_turn_number + 1,
+          updated_at: updatedAt,
+        });
+        return existing.next_turn_number;
+      }
+
+      const seeded = getNextTurnFromExistingTurnsStmt.get(
+        p.workspace_id,
+        p.session_id,
+      ) as { next_turn_number: number };
+      insertTurnCounterStmt.run({
+        workspace_id: p.workspace_id,
+        session_id: p.session_id,
+        next_turn_number: seeded.next_turn_number + 1,
+        updated_at: updatedAt,
+      });
+      return seeded.next_turn_number;
+    },
+  ) as (p: AllocateTurnNumberParams) => number;
 
   db.insertTurn = (p: InsertTurnParams) => void insertTurnStmt.run({
     ...p,
@@ -513,12 +578,25 @@ export function openDatabase(dbPath: string): CachelaneDb {
     });
   };
 
+  db.updateTurnExplanationUsage = (turnId: string, usage: TurnExplanationUsage, updatedAt: number) => {
+    updateTurnExplanationUsageStmt.run({
+      turn_id: turnId,
+      input_tokens: usage.input_tokens,
+      output_tokens: usage.output_tokens,
+      cache_creation_5m_tokens: usage.cache_creation_5m_tokens,
+      cache_creation_1h_tokens: usage.cache_creation_1h_tokens,
+      cache_read_tokens: usage.cache_read_tokens,
+      effective_cost_units: usage.effective_cost_units,
+      updated_at: updatedAt,
+    });
+  };
+
   db.getTurnExplanation = (params: GetTurnExplanationParams = {}) => {
     const where = explanationWhere(params);
     const stmt = rawDb.prepare(`
       SELECT * FROM turn_explanations
       ${where.sql}
-      ORDER BY turn_number DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, turn_number DESC, id DESC
       LIMIT 1
     `);
     const row = stmt.get(where.bindings) as TurnExplanationRow | undefined;
@@ -544,7 +622,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
     const stmt = rawDb.prepare(`
       SELECT * FROM turn_explanations
       ${sql}
-      ORDER BY turn_number DESC, created_at DESC, id DESC
+      ORDER BY created_at DESC, turn_number DESC, id DESC
       LIMIT @limit
     `);
     const rows = stmt.all(bindings) as TurnExplanationRow[];

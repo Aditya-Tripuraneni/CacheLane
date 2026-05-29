@@ -31,9 +31,10 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     upstream_host: "api.anthropic.com",
     upstream_port: 443,
     upstream_ssl: true,
+    upstream_path_prefix: "",
   },
   features: {
-    auto_proxy: false,
+    auto_proxy: true,
     k_pruner: true,
     keepalive: true,
     mutation_enabled: true,

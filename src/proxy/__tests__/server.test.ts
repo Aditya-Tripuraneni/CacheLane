@@ -17,7 +17,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { startProxy } from "../server.js";
+import { startProxy, createProxyServer } from "../server.js";
+import { CacheStateTracker } from "../../orchestrator/index.js";
 import { openDatabase } from "../../storage/index.js";
 import type { AnthropicMessagesRequest } from "../../orchestrator/types.js";
 
@@ -162,19 +163,24 @@ interface CapturedRequest {
 let fakeUpstream: http.Server;
 let fakeUpstreamPort: number;
 let lastCaptured: CapturedRequest | null = null;
+let capturedRequests: CapturedRequest[] = [];
 let fakeResponseBody: string = nonStreamingResponseBody();
 let fakeResponseContentType = "application/json";
 let fakeResponseStatus = 200;
+let fakeResponseDelayMs = 0;
 
 function resetFakeUpstream(
   body = nonStreamingResponseBody(),
   contentType = "application/json",
   status = 200,
+  delayMs = 0,
 ): void {
   lastCaptured = null;
+  capturedRequests = [];
   fakeResponseBody = body;
   fakeResponseContentType = contentType;
   fakeResponseStatus = status;
+  fakeResponseDelayMs = delayMs;
 }
 
 beforeAll(async () => {
@@ -182,14 +188,23 @@ beforeAll(async () => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
     req.on("end", () => {
-      lastCaptured = {
+      const captured = {
         method: req.method ?? "",
         path: req.url ?? "",
         headers: req.headers,
         body: Buffer.concat(chunks).toString("utf-8"),
       };
-      upstreamRes.writeHead(fakeResponseStatus, { "content-type": fakeResponseContentType });
-      upstreamRes.end(fakeResponseBody);
+      lastCaptured = captured;
+      capturedRequests.push(captured);
+      const respond = () => {
+        upstreamRes.writeHead(fakeResponseStatus, { "content-type": fakeResponseContentType });
+        upstreamRes.end(fakeResponseBody);
+      };
+      if (fakeResponseDelayMs > 0) {
+        setTimeout(respond, fakeResponseDelayMs);
+      } else {
+        respond();
+      }
     });
   });
   // fake upstream must call listen() explicitly; waitForServer resolves once bound
@@ -324,6 +339,53 @@ describe("proxy pipeline integration", () => {
         db.close();
       }
     });
+
+    it("records keepalive pings count in keepalive_pings_since_last_turn", async () => {
+      const customDbPath = path.join(tmpDir, "keepalive-custom.db");
+      const customDb = openDatabase(customDbPath);
+      const customTracker = new CacheStateTracker();
+
+      customTracker.update("test-ws", "keepalive-sess", {
+        workspace_id: "test-ws",
+        prefix_hash: "dummy-hash",
+        middle_hash: null,
+        prefix_token_count: 50,
+        ttl_class: "5m",
+        cached_at_ms: Date.now(),
+        last_read_at_ms: Date.now(),
+        expected_expiry_ms: Date.now() + 300_000,
+        keepalive_pings_since_last_turn: 3,
+      });
+
+      const customProxy = createProxyServer(
+        {
+          port: 0,
+          workspace_id: "test-ws",
+          session_id: "keepalive-sess",
+          upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+        },
+        customDb,
+        customTracker,
+      );
+
+      customProxy.listen(0, "127.0.0.1");
+      const customPort = await waitForServer(customProxy);
+
+      try {
+        await postMessages(customPort, JSON.stringify(buildMessagesRequest()));
+        await waitForTurn(customDbPath, "keepalive-sess");
+
+        const turn = customDb.getTurnByNumber("test-ws", "keepalive-sess", 1);
+        expect(turn).not.toBeNull();
+        expect(turn!.keepalive_pings_since_last_turn).toBe(3);
+
+        const trackerState = customTracker.get("test-ws", "keepalive-sess");
+        expect(trackerState?.keepalive_pings_since_last_turn).toBe(0);
+      } finally {
+        await closeServer(customProxy);
+        customDb.close();
+      }
+    });
   });
 
   describe("turn recording — SSE streaming response", () => {
@@ -381,6 +443,30 @@ describe("proxy pipeline integration", () => {
   });
 
   describe("passthrough — non-messages paths", () => {
+    it("prepends an upstream path prefix while still intercepting bare /v1/messages locally", async () => {
+      const prefixedProxy = startProxy({
+        port: 0,
+        db_path: path.join(tmpDir, "prefixed.db"),
+        workspace_id: "test-ws",
+        session_id: "prefixed-session",
+        upstream: {
+          host: "127.0.0.1",
+          port: fakeUpstreamPort,
+          ssl: false,
+          path_prefix: "/api/anthropic",
+        },
+      });
+      const prefixedPort = await waitForServer(prefixedProxy);
+
+      try {
+        await postMessages(prefixedPort, JSON.stringify(buildMessagesRequest()));
+
+        expect(lastCaptured?.path).toBe("/api/anthropic/v1/messages");
+      } finally {
+        await closeServer(prefixedProxy);
+      }
+    });
+
     it("forwards GET requests to the upstream without DB recording", async () => {
       resetFakeUpstream(JSON.stringify({ type: "list", data: [] }));
 
@@ -487,6 +573,52 @@ describe("proxy pipeline integration", () => {
         await closeServer(brokenProxy);
       }
     }, 10_000);
+
+    it("records a fallback explanation when the pipeline fails after turn allocation", async () => {
+      const badConfigPath = path.join(tmpDir, "bad-config.json");
+      fs.writeFileSync(badConfigPath, JSON.stringify({ version: 2 }));
+      resetFakeUpstream();
+
+      const fallbackProxy = startProxy({
+        port: 0,
+        db_path: dbPath,
+        config_path: badConfigPath,
+        workspace_id: "test-ws",
+        session_id: "fallback-session",
+        upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+      });
+      const fallbackPort = await waitForServer(fallbackProxy);
+
+      try {
+        const original = JSON.stringify(buildMessagesRequest());
+        const res = await postMessages(fallbackPort, original);
+        expect(res.status).toBe(200);
+        expect(lastCaptured?.body).toBe(original);
+        await waitForTurn(dbPath, "fallback-session");
+
+        const db = openDatabase(dbPath);
+        try {
+          const turn = db.getTurnByNumber("test-ws", "fallback-session", 1);
+          expect(turn?.request_mutated).toBe(0);
+          expect(turn?.signals).toContain("error:fallback");
+
+          const explanation = db.getTurnExplanation({
+            workspace_id: "test-ws",
+            session_id: "fallback-session",
+            turn_number: 1,
+          });
+          expect(explanation).toMatchObject({
+            mutated: false,
+            signals: ["error:fallback"],
+            region_metadata: { message_count: 0 },
+          });
+        } finally {
+          db.close();
+        }
+      } finally {
+        await closeServer(fallbackProxy);
+      }
+    });
   });
 
   describe("turn counting — sequential requests", () => {
@@ -507,6 +639,31 @@ describe("proxy pipeline integration", () => {
           expect(turn).not.toBeNull();
           expect(turn!.turn_number).toBe(n);
         }
+      } finally {
+        db.close();
+      }
+    });
+
+    it("allocates distinct turn numbers for overlapping requests in the same session", async () => {
+      resetFakeUpstream(nonStreamingResponseBody(), "application/json", 200, 100);
+      const body = JSON.stringify(buildMessagesRequest());
+
+      const [first, second] = await Promise.all([
+        postMessages(proxyPort, body),
+        postMessages(proxyPort, body),
+      ]);
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(capturedRequests).toHaveLength(2);
+      await waitForTurn(dbPath, "test-session", 2);
+
+      const db = openDatabase(dbPath);
+      try {
+        const stats = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "test-session" });
+        expect(stats.turns).toBe(2);
+        expect(db.getTurnByNumber("test-ws", "test-session", 1)).not.toBeNull();
+        expect(db.getTurnByNumber("test-ws", "test-session", 2)).not.toBeNull();
       } finally {
         db.close();
       }

@@ -1,9 +1,9 @@
+import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { randomUUID, createHash } from "node:crypto";
-import { loadConfig } from "../config/index.js";
+import { loadConfig, defaultWorkspaceId } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
-import type { UpdateBlockCountersParams } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
@@ -73,12 +73,11 @@ export function computeBlockPlacements(
   const blockMap = new Map(blocks.map(b => [b.id, b]));
 
   for (let mIdx = 0; mIdx < messages.length; mIdx++) {
-    const msg = messages[mIdx];
-    if (!msg) continue;
+    const msg = messages[mIdx]!;
     if (msg.role === "user" && Array.isArray(msg.content)) {
       for (let cIdx = 0; cIdx < msg.content.length; cIdx++) {
-        const c = msg.content[cIdx] as any;
-        if (c.type === "tool_result" && c.tool_use_id) {
+        const c = msg.content[cIdx];
+        if (c?.type === "tool_result" && c.tool_use_id) {
           const row = blockMap.get(c.tool_use_id);
           if (row) {
             placements.push({
@@ -122,6 +121,22 @@ export interface UpstreamTarget {
   host: string;
   port: number;
   ssl: boolean;
+  path_prefix: string;
+}
+
+function normalisePathPrefix(prefix: string | undefined): string {
+  if (!prefix || prefix === "/") return "";
+  const withLeadingSlash = prefix.startsWith("/") ? prefix : `/${prefix}`;
+  return withLeadingSlash.replace(/\/+$/, "");
+}
+
+function buildUpstreamPath(upstream: UpstreamTarget, reqPath: string): string {
+  const prefix = normalisePathPrefix(upstream.path_prefix);
+  if (!prefix) return reqPath;
+  const [pathOnly = "/", query] = reqPath.split("?", 2);
+  const withSlash = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`;
+  const nextPath = `${prefix}${withSlash}`;
+  return query === undefined ? nextPath : `${nextPath}?${query}`;
 }
 
 function makeRequest(
@@ -143,14 +158,22 @@ function forwardUpstream(
 ): void {
   const upstreamReq = makeRequest(
     upstream,
-    { path, method, headers: { ...headers, host: upstream.host } },
+    { path: buildUpstreamPath(upstream, path), method, headers: { ...headers, host: upstream.host } },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers as http.OutgoingHttpHeaders);
       upstreamRes.pipe(res);
     },
   );
 
-    upstreamReq.write(body);
+  upstreamReq.on("error", (err) => {
+    // Avoid crashing the proxy process if upstream connection fails
+    if (!res.headersSent) {
+      res.writeHead(502);
+      res.end(JSON.stringify({ error: { message: `Bad Gateway: ${err.message}` } }));
+    }
+  });
+
+  upstreamReq.write(body);
   upstreamReq.end();
 }
 
@@ -188,11 +211,12 @@ export function createProxyServer(
   db: CachelaneDb,
   tracker: CacheStateTracker,
 ): http.Server {
-  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
+  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
   const upstream: UpstreamTarget = {
     host: opts.upstream?.host ?? DEFAULT_UPSTREAM_HOST,
     port: opts.upstream?.port ?? DEFAULT_UPSTREAM_PORT,
     ssl: opts.upstream?.ssl ?? true,
+    path_prefix: opts.upstream?.path_prefix ?? "",
   };
 
   return http.createServer((req, res) => {
@@ -228,22 +252,19 @@ export function createProxyServer(
 
       const requestHeaders = headersFromIncoming(req);
       const sessionIdHeader = requestHeaders["x-claude-code-session-id"];
-      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0
-        ? sessionIdHeader
+      const sessionId = typeof sessionIdHeader === "string" && sessionIdHeader.length > 0 
+        ? sessionIdHeader 
         : (opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID());
-
-      // Compute referenced IDs before the try block so the fail-open path can
-      // still pass them through — we don't want to increment unused_turns for
-      // blocks that are actually present in the request even if the pipeline errors.
-      const referencedIds = extractReferencedBlockIds(parsed.messages);
 
       let currentTurn = 0;
       const turnId = randomUUID();
       try {
-        const config = loadConfig(opts.config_path ?? defaultConfigPath());
+        currentTurn = db.allocateTurnNumber({
+          workspace_id: workspaceId,
+          session_id: sessionId,
+        });
 
-        const stats = db.getStats({ scope: "session", workspace_id: workspaceId, session_id: sessionId });
-        currentTurn = stats.turns + 1;
+        const config = loadConfig(opts.config_path ?? defaultConfigPath());
 
         const messageClassifications = classifyAllMessages(
           parsed.messages,
@@ -276,10 +297,11 @@ export function createProxyServer(
 
         if (actuallyMutate) {
           logger.info("mutated request", JSON.stringify({
+            session: sessionId,
             turn: currentTurn,
             signals: finalSignals,
             pruned: result.pruned_blocks_count,
-          }), { session_id: sessionId });
+          }));
         }
 
         const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
@@ -297,17 +319,29 @@ export function createProxyServer(
           prunedCount: result.pruned_blocks_count,
           requestMutated: actuallyMutate ? 1 : 0,
           signals: finalSignals,
-          referencedIds,
+          keepalivePings: result.keepalive_pings_since_last_turn ?? 0,
         });
       } catch (err) {
         // Fail-open: pipeline error → forward original request unchanged.
         // DB is owned by the caller; do NOT close it here.
-        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err, { session_id: sessionId });
-        proxyAndRecord(upstream, method, reqPath, headersFromIncoming(req), body, res, {
+        logger.error("pipeline error — failing open", err instanceof Error ? err.message : String(err), err);
+        const fallbackTurn = currentTurn || 1;
+        recordFallbackExplanation({
           db,
           workspaceId,
           sessionId,
-          currentTurn: currentTurn || 1, // Fallback turn if failed before stats
+          currentTurn: fallbackTurn,
+          turnId,
+          model: parsed.model || "unknown",
+          signals: ["error:fallback"],
+        });
+        const fallbackHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
+        fallbackHeaders["content-length"] = String(body.length);
+        proxyAndRecord(upstream, method, reqPath, fallbackHeaders, body, res, {
+          db,
+          workspaceId,
+          sessionId,
+          currentTurn: fallbackTurn,
           turnId,
           model: parsed.model || "unknown",
           prefixHash: "",
@@ -315,7 +349,7 @@ export function createProxyServer(
           prunedCount: 0,
           requestMutated: 0,
           signals: ["error:fallback"],
-          referencedIds,
+          keepalivePings: 0,
         });
       }
     });
@@ -328,9 +362,42 @@ export function createProxyServer(
   });
 }
 
+function recordFallbackExplanation(opts: Pick<
+  RecordOptions,
+  "db" | "workspaceId" | "sessionId" | "currentTurn" | "turnId" | "model"
+> & { signals: string[] }): void {
+  const now = Date.now();
+  try {
+    opts.db.insertTurnExplanation({
+      turn_id: opts.turnId,
+      workspace_id: opts.workspaceId,
+      session_id: opts.sessionId,
+      turn_number: opts.currentTurn,
+      model: opts.model,
+      prefix_breakpoint_hash: null,
+      middle_breakpoint_hash: null,
+      mutated: false,
+      pruned_blocks_count: 0,
+      prune_decisions: [],
+      block_metadata: [],
+      region_metadata: {
+        message_count: 0,
+        stable_count: 0,
+        semi_count: 0,
+        volatile_count: 0,
+      },
+      signals: opts.signals,
+      created_at: now,
+      updated_at: now,
+    });
+  } catch (err) {
+    logger.error("failed to record fallback explanation", String(err), err);
+  }
+}
+
 export function startProxy(opts: ProxyOptions = {}): http.Server {
   const port = opts.port ?? DEFAULT_PORT;
-  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? "default";
+  const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
   const sessionId = opts.session_id ?? process.env.CACHELANE_SESSION_ID ?? randomUUID();
 
   // Standalone proxy: owns its DB and tracker for the lifetime of the server.
@@ -351,29 +418,10 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
   server.listen(port, "127.0.0.1", () => {
     const boundPort = (server.address() as { port: number } | null)?.port ?? port;
     logger.info("listening", `http://127.0.0.1:${boundPort}`);
-    logger.info("session initialized", JSON.stringify({ workspace: workspaceId }), { session_id: sessionId });
+    logger.info("session initialized", JSON.stringify({ session: sessionId, workspace: workspaceId }));
   });
 
   return server;
-}
-
-/**
- * Extract the set of tool_use_ids that appear as tool_result blocks in the
- * current request.  These are the blocks "referenced" this turn — their
- * unused_turns counter will be reset to 0 rather than incremented.
- */
-function extractReferencedBlockIds(messages: AnthropicMessage[]): Set<string> {
-  const ids = new Set<string>();
-  for (const msg of messages) {
-    if (msg.role === "user" && Array.isArray(msg.content)) {
-      for (const c of msg.content as Array<Record<string, unknown>>) {
-        if (c.type === "tool_result" && typeof c.tool_use_id === "string") {
-          ids.add(c.tool_use_id);
-        }
-      }
-    }
-  }
-  return ids;
 }
 
 interface RecordOptions {
@@ -388,8 +436,7 @@ interface RecordOptions {
   prunedCount: number;
   requestMutated?: number;
   signals?: string[] | null;
-  /** Block IDs (tool_use_ids) present in the current request — used to update unused_turns. */
-  referencedIds: Set<string>;
+  keepalivePings?: number;
 }
 
 function proxyAndRecord(
@@ -410,20 +457,6 @@ function proxyAndRecord(
     if (status === "recorded") {
       const responseBody = Buffer.concat(responseChunks);
       recordUsageFromResponse(responseBody, recordOpts);
-      // Update unused_turns BEFORE inserting new blocks so newly inserted
-      // blocks start at unused_turns=0 and only age from the next turn onward.
-      try {
-        const countersParams: UpdateBlockCountersParams = {
-          workspace_id: recordOpts.workspaceId,
-          session_id: recordOpts.sessionId,
-          turn_number: recordOpts.currentTurn,
-          referenced_ids: recordOpts.referencedIds,
-          updated_at: Date.now(),
-        };
-        recordOpts.db.updateBlockCounters(countersParams);
-      } catch (err) {
-        logger.error("failed to update block counters", String(err), err, { session_id: recordOpts.sessionId });
-      }
       extractAndInsertToolResults(body, recordOpts);
     }
     // DB lifetime is owned by the caller (startProxy or tryBindProxy);
@@ -432,7 +465,7 @@ function proxyAndRecord(
 
   const upstreamReq = makeRequest(
     upstream,
-    { path, method, headers: { ...headers, host: upstream.host } },
+    { path: buildUpstreamPath(upstream, path), method, headers: { ...headers, host: upstream.host } },
     (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers as http.OutgoingHttpHeaders);
 
@@ -466,7 +499,7 @@ function proxyAndRecord(
   });
 
   upstreamReq.on("error", (err) => {
-    logger.error("upstream error", err.message, err, { session_id: recordOpts.sessionId });
+    logger.error("upstream error", err.message, err);
     if (!res.headersSent) {
       res.writeHead(502, { "content-type": "application/json" });
       res.end(JSON.stringify({ error: "upstream_error" }));
@@ -484,6 +517,9 @@ function proxyAndRecord(
 function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
   try {
     const text = raw.toString("utf-8");
+    try {
+      fs.writeFileSync("/Users/jimmy/Documents/CacheLane/raw_response.txt", text);
+    } catch {}
     interface UsageFields {
       input_tokens?: number;
       output_tokens?: number;
@@ -509,11 +545,23 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         }
         if (evt.type === "message_delta" && evt.usage) {
           const delta = evt.usage as UsageFields;
-          // Only merge output_tokens from delta; never clobber input/cache fields
-          // with a delta that lacks them. Guard against a delta arriving before
-          // message_start (malformed stream): skip entirely in that case.
           if (usage !== null) {
-            usage = Object.assign({}, usage, { output_tokens: delta.output_tokens }) as UsageFields;
+            usage = {
+              ...usage,
+              input_tokens: delta.input_tokens ?? usage.input_tokens,
+              output_tokens: delta.output_tokens ?? usage.output_tokens,
+              cache_creation_input_tokens: delta.cache_creation_input_tokens ?? usage.cache_creation_input_tokens,
+              cache_creation_5m_tokens: delta.cache_creation_5m_tokens ?? usage.cache_creation_5m_tokens,
+              cache_creation_1h_tokens: delta.cache_creation_1h_tokens ?? usage.cache_creation_1h_tokens,
+              cache_read_input_tokens: delta.cache_read_input_tokens ?? usage.cache_read_input_tokens,
+            };
+            if (delta.input_tokens) usage.input_tokens = delta.input_tokens;
+            if (delta.cache_creation_input_tokens) usage.cache_creation_input_tokens = delta.cache_creation_input_tokens;
+            if (delta.cache_creation_5m_tokens) usage.cache_creation_5m_tokens = delta.cache_creation_5m_tokens;
+            if (delta.cache_creation_1h_tokens) usage.cache_creation_1h_tokens = delta.cache_creation_1h_tokens;
+            if (delta.cache_read_input_tokens) usage.cache_read_input_tokens = delta.cache_read_input_tokens;
+          } else {
+            usage = { ...delta };
           }
         }
       } catch { /* skip malformed SSE lines */ }
@@ -558,25 +606,44 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         prefix_breakpoint_hash: opts.prefixHash || null,
         middle_breakpoint_hash: opts.middleHash,
         pruned_blocks_count: opts.prunedCount,
-        keepalive_pings_since_last_turn: 0,
+        keepalive_pings_since_last_turn: opts.keepalivePings ?? 0,
         request_mutated: opts.requestMutated ?? 0,
         signals: opts.signals ? JSON.stringify(opts.signals) : null,
         created_at: Date.now(),
       });
-      logger.info("recorded turn", JSON.stringify({
-        turn: opts.currentTurn,
-        input: inputTokens,
-        cache_read: cacheRead,
-        effective,
-      }), { session_id: opts.sessionId });
     } catch (insertErr) {
-      // UNIQUE constraint = turn already recorded (idempotent re-delivery)
       if (!(insertErr instanceof Error && insertErr.message.includes("UNIQUE"))) {
-        logger.error("failed to record turn", String(insertErr), insertErr, { session_id: opts.sessionId });
+        logger.error("failed to record turn", String(insertErr), insertErr);
       }
     }
+
+    try {
+      if (typeof opts.db.updateTurnExplanationUsage === "function") {
+        opts.db.updateTurnExplanationUsage(
+          opts.turnId,
+          {
+            input_tokens: inputTokens,
+            output_tokens: outputTokens,
+            cache_creation_5m_tokens: cacheCreation5m,
+            cache_creation_1h_tokens: cacheCreation1h,
+            cache_read_tokens: cacheRead,
+            effective_cost_units: effective,
+          },
+          Date.now()
+        );
+      }
+    } catch (err) {
+      logger.error("failed to update turn explanation usage from response", String(err), err);
+    }
+
+    logger.info("recorded turn", JSON.stringify({
+      turn: opts.currentTurn,
+      input: inputTokens,
+      cache_read: cacheRead,
+      effective,
+    }));
   } catch (err) {
-    logger.error("failed to parse upstream response for recording", String(err), err, { session_id: opts.sessionId });
+    logger.error("failed to parse upstream response for recording", String(err), err);
   }
 }
 
@@ -584,6 +651,14 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
   try {
     const req = JSON.parse(body.toString("utf-8")) as AnthropicMessagesRequest;
     if (!req.messages || !Array.isArray(req.messages)) return;
+
+    opts.db.updateBlockCounters({
+      workspace_id: opts.workspaceId,
+      session_id: opts.sessionId,
+      turn_number: opts.currentTurn,
+      referenced_ids: new Set(),
+      updated_at: Date.now(),
+    });
 
     for (const msg of req.messages) {
       if (msg.role === "user" && Array.isArray(msg.content)) {
@@ -608,18 +683,14 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
                 unused_turns: 0,
                 is_stub: false,
                 stub_summary: null,
-                // tool_use_id is the natural refetch handle: the stub display
-                // text shows it so the model can identify which tool call to
-                // re-run via cachelane:expand.  Must be non-null for the
-                // K-pruner's SQL filter (refetch_handle IS NOT NULL) to match.
-                refetch_handle: c.tool_use_id,
+                refetch_handle: c.tool_use_id ? JSON.stringify({ type: "tool_use", id: c.tool_use_id }) : null,
                 restored_at_turn: null,
                 created_at: Date.now(),
                 updated_at: Date.now(),
               });
             } catch (err) {
               if (!(err instanceof Error && err.message.includes("UNIQUE"))) {
-                logger.error("failed to insert block", String(err), err, { session_id: opts.sessionId });
+                logger.error("failed to insert block", String(err), err);
               }
             }
           }
@@ -627,7 +698,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
       }
     }
   } catch (err) {
-    logger.error("failed to extract tool_result blocks", String(err), err, { session_id: opts.sessionId });
+    logger.error("failed to extract tool_result blocks", String(err), err);
   }
 }
 

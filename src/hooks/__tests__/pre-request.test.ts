@@ -107,7 +107,7 @@ describe("handlePreRequest", () => {
     expect(result.pruned_blocks_count).toBe(1);
     expect(result.request.messages[0]?.content[0]).toEqual({
       type: "text",
-      text: "[stub:01KPREQ1] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane:expand(block_id=01KPREQ1)",
+      text: "[stub:01KPREQ1] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KPREQ1)",
     });
     expect(result.request.tools?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",

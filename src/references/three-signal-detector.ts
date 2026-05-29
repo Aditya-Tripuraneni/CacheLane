@@ -141,7 +141,7 @@ export function detectDetailedReferences(turn: ReferenceTurn): DetectedReference
   if (refs.length > 0) {
     const byType = { tool_call: 0, id_mention: 0, text_quote: 0 };
     for (const ref of refs) byType[ref.reference_type] += 1;
-    console.info("[cachelane] reference detector", {
+    console.error("[cachelane] reference detector", {
       detected: refs.length,
       of: turn.blocks_in_prompt.length,
       by_type: byType,

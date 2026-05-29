@@ -10,11 +10,16 @@ function cloneMaterializableRequest<TRequest extends MaterializableRequest>(
 ): TRequest {
   // ...request spreads all TRequest properties beyond MaterializableRequest,
   // so the shape is preserved even though TS can't prove it structurally.
+  // Guard: Claude Code sometimes sends messages with string content (e.g. simple
+  // user turns). String content cannot contain tool_results so no block placement
+  // will ever point at such a message — but we must not call .map() on a string.
   return {
     ...request,
     messages: request.messages.map((message) => ({
       ...message,
-      content: message.content.map((content) => ({ ...content })),
+      content: Array.isArray(message.content)
+        ? message.content.map((content) => ({ ...content }))
+        : message.content,
     })),
   } as TRequest;
 }

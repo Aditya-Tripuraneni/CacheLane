@@ -18,7 +18,6 @@ export function handleHealthTool(
   
   const recentExplanations = context.db.getRecentTurnExplanations({
     workspace_id: context.workspace_id,
-    session_id: context.session_id,
     limit: 20,
   });
 
@@ -34,7 +33,7 @@ export function handleHealthTool(
   const fallbackPercentage = fallbackCount / total;
 
   const status = fallbackPercentage > 0.05 ? "degraded" : "ok";
-  const explanation = `${fallbackCount} of the last ${total} turns in the current session used fallback mode.`;
+  const explanation = `${fallbackCount} of the last ${total} workspace turns used fallback mode.`;
 
   return {
     status,
