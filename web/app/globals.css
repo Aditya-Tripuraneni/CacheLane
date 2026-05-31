@@ -1,26 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  --color-bg: oklch(0.98 0.005 45); /* #FCFAF7 */
-  --color-bg-elev: oklch(0.94 0.015 45); /* #F5ECE3 */
-  --color-bg-inline: oklch(0.90 0.025 45); /* #EBDCCB */
-  --color-fg: oklch(0.18 0.018 45); /* #1B1410 */
-  --color-fg-muted: oklch(0.38 0.030 45); /* #5A3E31 */
-  --color-fg-faint: oklch(0.55 0.035 45); /* #8A6F62 */
-  --color-border: oklch(0.87 0.015 45); /* #E0D2C4 */
-  --color-border-strong: oklch(0.77 0.025 45); /* #C0AFA0 */
-  --color-accent: oklch(0.53 0.120 50); /* #995F2F */
-  --color-accent-fg: oklch(0.98 0.005 45); /* #FCFAF7 */
+  --color-bg: oklch(0.965 0.005 75); /* Pampas #F4F3EE */
+  --color-bg-elev: oklch(1 0 0); /* White #FFFFFF */
+  --color-bg-inline: oklch(0.93 0.01 75); /* #EADCD0 or similar warm cream */
+  --color-fg: oklch(0.15 0.005 75); /* Deep Charcoal-Espresso #191816 */
+  --color-fg-muted: oklch(0.40 0.01 75); /* Cloudy Dark #5C5850 */
+  --color-fg-faint: oklch(0.55 0.01 75); /* Cloudy Taupe #B1ADA1 */
+  --color-border: oklch(0.90 0.005 75); /*Soft Cloudy #E2E0D9 */
+  --color-border-strong: oklch(0.75 0.01 75); /* Cloudy Taupe #B1ADA1 */
+  --color-accent: oklch(0.55 0.17 40); /* Crail Rust Orange #C15F3C */
+  --color-accent-fg: oklch(1 0 0); /* White #FFFFFF */
   
-  --color-success: oklch(0.48 0.045 145); /* #4E6E5D */
-  --color-success-bg: oklch(0.96 0.010 145);
+  --color-success: oklch(0.48 0.045 145); /* Sage Green #4F675A */
+  --color-success-bg: oklch(0.95 0.01 145);
   --color-warn: oklch(0.48 0.070 50); /* #8A5A44 */
   --color-warn-bg: oklch(0.96 0.020 50);
   --color-danger: oklch(0.38 0.100 35); /* #7A351D */
   --color-danger-bg: oklch(0.95 0.020 35);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
 
   --ease-standard: cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
@@ -33,7 +34,7 @@
   body {
     background: var(--color-bg);
     color: var(--color-fg);
-    font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-sans), system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -74,7 +75,9 @@
   .prose-cachelane {
     max-width: 72ch;
     color: var(--color-fg-muted);
-    line-height: 1.7;
+    line-height: 1.75;
+    font-family: var(--font-serif), Georgia, serif;
+    font-size: 1.05rem;
   }
 
   .prose-cachelane > * + * {
@@ -86,17 +89,18 @@
   .prose-cachelane h3,
   .prose-cachelane h4 {
     color: var(--color-fg);
-    letter-spacing: -0.025em;
+    font-family: var(--font-serif), Georgia, serif;
+    letter-spacing: -0.02em;
     font-weight: 700;
-    margin-top: 2.2em;
-    margin-bottom: 0.6em;
+    margin-top: 2em;
+    margin-bottom: 0.5em;
     scroll-margin-top: 5rem;
   }
 
   .prose-cachelane h1 { font-size: 2.5rem; line-height: 1.15; margin-top: 0; }
-  .prose-cachelane h2 { font-size: 1.65rem; line-height: 1.25; border-bottom: 1px solid var(--color-border); padding-bottom: 0.3em; }
-  .prose-cachelane h3 { font-size: 1.3rem; line-height: 1.3; }
-  .prose-cachelane h4 { font-size: 1.1rem; line-height: 1.4; }
+  .prose-cachelane h2 { font-size: 1.75rem; line-height: 1.25; border-bottom: 1px solid var(--color-border); padding-bottom: 0.3em; }
+  .prose-cachelane h3 { font-size: 1.35rem; line-height: 1.3; }
+  .prose-cachelane h4 { font-size: 1.15rem; line-height: 1.4; }
 
   .prose-cachelane a {
     color: var(--color-accent);
@@ -113,7 +117,7 @@
 
   .prose-cachelane code:not(pre code) {
     font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.88em;
+    font-size: 0.85em;
     background: var(--color-bg-inline);
     border: 1px solid var(--color-border);
     padding: 0.15em 0.35em;
@@ -128,7 +132,7 @@
     padding: 1rem;
     overflow-x: auto;
     font-family: var(--font-mono), monospace;
-    font-size: 0.9em;
+    font-size: 0.88em;
     color: var(--color-fg);
     margin: 1.5rem 0;
   }

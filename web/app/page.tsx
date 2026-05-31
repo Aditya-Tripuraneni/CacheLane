@@ -49,7 +49,7 @@ export default function HomePage() {
               </FadeIn>
               
               <FadeIn delay={0.05}>
-                <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl text-[var(--color-fg)] leading-[1.05]">
+                <h1 className="text-4xl font-bold font-serif tracking-tight sm:text-5xl lg:text-6xl text-[var(--color-fg)] leading-[1.05]">
                   Pay <span className="bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-warn)] bg-clip-text text-transparent">90% Less</span> on Repeated Claude Code Tokens
                 </h1>
               </FadeIn>
@@ -118,7 +118,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl">
           <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
             <FadeIn>
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl text-[var(--color-fg)]">
+              <h2 className="text-3xl font-bold font-serif tracking-tight sm:text-4xl text-[var(--color-fg)]">
                 Side-by-Side: The Caching Edge
               </h2>
               <p className="text-[var(--color-fg-muted)] text-base sm:text-lg">
@@ -136,7 +136,7 @@ export default function HomePage() {
                   Standard Claude Code
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold mb-1 text-[var(--color-fg)]">Linear Cost Accumulation</h3>
+                  <h3 className="text-lg font-bold font-serif mb-1 text-[var(--color-fg)]">Linear Cost Accumulation</h3>
                   <p className="text-xs text-[var(--color-fg-faint)] mb-6">No breakpoint management or context pruning.</p>
 
                   <div className="space-y-4 font-mono text-xs">
@@ -185,7 +185,7 @@ export default function HomePage() {
                   With CacheLane
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold mb-1 text-[var(--color-fg)]">Cache-Aware Flattened Curve</h3>
+                  <h3 className="text-lg font-bold font-serif mb-1 text-[var(--color-fg)]">Cache-Aware Flattened Curve</h3>
                   <p className="text-xs text-[var(--color-fg-faint)] mb-6">Orchestration reorders blocks; K-pruning stubs idle content.</p>
 
                   <div className="space-y-4 font-mono text-xs">
@@ -244,7 +244,7 @@ export default function HomePage() {
         <div className="mx-auto max-w-7xl">
           <div className="text-center max-w-3xl mx-auto mb-16 space-y-4">
             <FadeIn>
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl text-[var(--color-fg)]">
+              <h2 className="text-3xl font-bold font-serif tracking-tight sm:text-4xl text-[var(--color-fg)]">
                 Local Optimization, Zero Configuration
               </h2>
               <p className="text-[var(--color-fg-muted)] text-base sm:text-lg">
@@ -261,7 +261,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <Layers size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">Cache-Aware Orchestration</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">Cache-Aware Orchestration</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   Automatically classifies incoming context blocks and aligns them into three regions with dual `cache_control` breakpoints.
                 </p>
@@ -274,7 +274,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <Cpu size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">Trajectory K-Pruning</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">Trajectory K-Pruning</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   Identifies stale files and tool-outputs unreferenced for consecutive turns and swaps them out for light, refetchable stubs.
                 </p>
@@ -287,7 +287,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <Zap size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">Adaptive Keepalive</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">Adaptive Keepalive</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   Schedules low-cost, single-token background pings when idle to keep your prompt cache hot, avoiding cold-start write penalties.
                 </p>
@@ -300,7 +300,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <Database size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">100% Local-First</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">100% Local-First</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   All references, database metrics, and logs are kept in a local SQLite file. Your prompts and files never leave your environment.
                 </p>
@@ -313,7 +313,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <ShieldAlert size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">Fail-Open Invariants</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">Fail-Open Invariants</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   Built to be completely invisible. Any internal runtime error gracefully returns the raw prompt, never breaking your editor session.
                 </p>
@@ -326,7 +326,7 @@ export default function HomePage() {
                 <div className="p-3 bg-[var(--color-bg)] border border-[var(--color-border)] rounded-lg w-fit text-[var(--color-accent)]">
                   <Terminal size={20} />
                 </div>
-                <h3 className="text-lg font-bold text-[var(--color-fg)]">TUI &amp; CLI Dashboard</h3>
+                <h3 className="text-lg font-bold font-serif text-[var(--color-fg)]">TUI &amp; CLI Dashboard</h3>
                 <p className="text-sm text-[var(--color-fg-muted)] leading-relaxed">
                   Use simple command line options like `cachelane stats` or `cachelane explain` to get transparent reports of your cache savings.
                 </p>
