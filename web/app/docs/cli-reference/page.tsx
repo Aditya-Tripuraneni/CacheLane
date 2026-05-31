@@ -46,11 +46,11 @@ export default function CliReferencePage() {
 
             <h3>cachelane stats</h3>
             <p>Prints cache ratios, turn counters, and estimated API savings.</p>
-            <CodeBlock language="bash">cachelane stats [--scope session|workspace|all] [--since &lt;duration&gt;]</CodeBlock>
+            <CodeBlock language="bash">cachelane stats [--scope session|workspace|all] [--since {'<'}duration{'>'}]</CodeBlock>
 
             <h3>cachelane explain</h3>
             <p>Explains context classification and pruning choices made during turn <InlineCode>N</InlineCode>.</p>
-            <CodeBlock language="bash">cachelane explain [--turn &lt;number&gt;]</CodeBlock>
+            <CodeBlock language="bash">cachelane explain [--turn {'<'}number{'>'}]</CodeBlock>
 
             <h3>cachelane prune</h3>
             <p>Configures pruning threshold variables. Default is <InlineCode>K=3</InlineCode>; aggressive is <InlineCode>K=2</InlineCode>; conservative is <InlineCode>K=5</InlineCode>.</p>
@@ -68,11 +68,11 @@ export default function CliReferencePage() {
 
             <h3>cachelane pin</h3>
             <p>Pins a target file or glob pattern, locking it inside the stable caching region to prevent it from ever being pruned.</p>
-            <CodeBlock language="bash">cachelane pin &lt;file|glob&gt;</CodeBlock>
+            <CodeBlock language="bash">cachelane pin {'<'}file|glob{'>'}</CodeBlock>
 
             <h3>cachelane exclude</h3>
             <p>Excludes files matching a glob pattern from cache-aware categorization.</p>
-            <CodeBlock language="bash">cachelane exclude &lt;file|glob&gt;</CodeBlock>
+            <CodeBlock language="bash">cachelane exclude {'<'}file|glob{'>'}</CodeBlock>
           </section>
         </FadeIn>
       </Prose>
