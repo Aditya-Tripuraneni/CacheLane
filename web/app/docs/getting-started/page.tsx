@@ -3,6 +3,7 @@ import { Prose } from '@/components/docs/prose';
 import { Callout } from '@/components/docs/callout';
 import { FadeIn } from '@/components/motion/fade-in';
 import { InlineCode } from '@/components/code/inline-code';
+import { CodeBlock } from '@/components/code/code-block';
 
 export default function GettingStartedPage() {
   return (
@@ -43,8 +44,7 @@ export default function GettingStartedPage() {
           <section id="installation">
             <h2>Installation</h2>
             <p>To compile and install CacheLane globally from source:</p>
-            <pre>
-<code>{`# Clone the repository
+            <CodeBlock language="bash">{`# Clone the repository
 git clone https://github.com/Aditya-Tripuraneni/CacheLane.git
 cd CacheLane
 
@@ -55,8 +55,7 @@ npm install
 npm run build
 
 # Link globally to your local npm registry
-npm link`}</code>
-            </pre>
+npm link`}</CodeBlock>
           </section>
         </FadeIn>
 
@@ -66,9 +65,7 @@ npm link`}</code>
             <p>
               Once linked, initialize the idempotent installation command. This registers the stdio MCP server in Claude's global settings and copies hook descriptors into place:
             </p>
-            <pre>
-<code>cachelane install</code>
-            </pre>
+            <CodeBlock language="bash">cachelane install</CodeBlock>
             <p>This command automatically executes the following changes:</p>
             <ol>
               <li>Registers the CacheLane MCP server inside <InlineCode>~/.claude/mcp.json</InlineCode>.</li>
@@ -84,9 +81,7 @@ npm link`}</code>
             <p>
               Verify your setup by running the built-in diagnostic tool. It checks Node compatibility, hook registration, configuration schemas, and database write access:
             </p>
-            <pre>
-<code>cachelane doctor</code>
-            </pre>
+            <CodeBlock language="bash">cachelane doctor</CodeBlock>
             <Callout kind="tip" title="Fail-Open Guarantee">
               If CacheLane ever encounters a runtime exception or database lock, it will log the error and **immediately pass the unmodified payload through** to Anthropic. Your Claude Code sessions will never break or crash.
             </Callout>

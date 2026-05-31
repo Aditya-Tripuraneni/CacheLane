@@ -3,6 +3,7 @@ import { Github, Coffee } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { MobileDrawer } from './mobile-drawer';
 import { Search } from '@/components/docs/search';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 
 export function TopNav() {
   return (
@@ -41,6 +42,7 @@ export function TopNav() {
           <div className="hidden sm:block">
             <Search />
           </div>
+          <ThemeToggle />
           <a
             href="https://github.com/Aditya-Tripuraneni/CacheLane"
             target="_blank"

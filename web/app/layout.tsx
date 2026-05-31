@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { Lora, Plus_Jakarta_Sans, JetBrains_Mono } from 'next/font/google';
+import { ThemeProvider } from '@/components/providers/theme-provider';
 import './globals.css';
 
 const lora = Lora({
@@ -40,7 +41,11 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${plusJakartaSans.variable} ${lora.variable} ${jetbrainsMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <ThemeProvider defaultTheme="system" storageKey="cachelane-theme">
+          {children}
+        </ThemeProvider>
+      </body>
     </html>
   );
 }
