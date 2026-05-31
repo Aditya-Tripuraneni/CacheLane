@@ -10,7 +10,7 @@
 
 ---
 
-## 🚀 Key Architectural Capabilities
+## Key Architectural Capabilities
 
 CacheLane sits as a local middleware between Claude Code and `api.anthropic.com`. It has three primary mechanisms:
 
@@ -31,9 +31,60 @@ CacheLane sits as a local middleware between Claude Code and `api.anthropic.com`
    * Automatically schedules minimal, low-cost synthetic pings (`max_tokens=1`) to keep the cache prefix hot.
    * Autodetects prefix size to adjust cache write tier behavior.
 
+### Architectural Diagrams
+
+#### Interception Hook Lifecycle
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Claude Code
+    participant CL as CacheLane Proxy
+    participant DB as Local SQLite DB
+    participant API as Anthropic API
+
+    Note over User, API: PreRequest Hook (Turn Start)
+    User->>CL: Forward API Request
+    CL->>DB: Query block states & volatility classes
+    DB-->>CL: Return metadata & unused counts
+    CL->>CL: Group by Volatility (STABLE / SEMI / VOLATILE)
+    CL->>CL: Apply K-Pruning & inject cache_control breakpoints
+    CL->>API: Send optimized request
+    API-->>CL: Stream SSE response
+    CL-->>User: Stream SSE response to Claude Code
+    
+    Note over User, API: PostResponse Hook (Turn End)
+    CL->>CL: Detect block references in response
+    CL->>DB: Log turn stats & update reference counters
+```
+
+#### Orchestrated Prompt Layout
+```mermaid
+graph TD
+    subgraph Prompt Structure
+        direction TB
+        A[STABLE Region<br/>System, tool definitions, pinned docs] -->|Breakpoint 1| B[SEMI Region<br/>Recent dialogue turns]
+        B -->|Breakpoint 2| C[VOLATILE Region<br/>Latest tool outputs, user query]
+    end
+
+    style A fill:#1e293b,stroke:#3b82f6,stroke-width:2px,color:#fff
+    style B fill:#334155,stroke:#10b981,stroke-width:2px,color:#fff
+    style C fill:#475569,stroke:#f59e0b,stroke-width:2px,color:#fff
+```
+
+#### Trajectory K-Pruning State Diagram
+```mermaid
+stateDiagram-v2
+    [*] --> Active : Block Added (unused_turns = 0)
+    Active --> Active : Referenced in Turn (Reset unused_turns = 0)
+    Active --> Idle : Unreferenced in Turn (unused_turns += 1)
+    Idle --> Active : Referenced in Turn (Reset unused_turns = 0)
+    Idle --> Stubbed : unused_turns >= K (Replace with stub)
+    Stubbed --> Active : Model calls cachelane:expand (Materialize & Restore)
+```
+
 ---
 
-## 🔒 Security & Privacy (100% Local-First)
+## Security & Privacy (100% Local-First)
 
 * **No SaaS Backend**: CacheLane is completely local. No prompt text, assistant responses, or file contents ever leave your machine except to go directly to `api.anthropic.com` over TLS.
 * **Metadata-Only SQLite Logs**: The local database (`~/.cachelane/cachelane.db`) only stores block hashes, token counts, and hit statistics. It **never** persists prompt bodies, secrets, or file contents.
@@ -41,7 +92,7 @@ CacheLane sits as a local middleware between Claude Code and `api.anthropic.com`
 
 ---
 
-## 🛠️ Developer Onboarding & Installation
+## Developer Onboarding & Installation
 
 ### Prerequisites
 * **Node.js**: `v20.10.x` or later (Node 20 is recommended as native `better-sqlite3` bindings are precompiled for Node 20).
@@ -85,7 +136,7 @@ npm run doctor:ci
 
 ---
 
-## 🛡️ Why Trust CacheLane?
+## Why Trust CacheLane?
 
 A caching layer must never break your editor or disconnect you from your assistant. We built CacheLane with strict production invariants:
 
@@ -128,7 +179,7 @@ This script replays pre-recorded Claude Code sessions under simulated conditions
 
 ---
 
-## 💻 CLI & MCP Command Reference
+## CLI & MCP Command Reference
 
 ### CLI Utilities
 | Command | Purpose |
@@ -152,7 +203,7 @@ When the MCP server is running, Claude can call these tools:
 
 ---
 
-## 🗄️ Directories & Data Storage
+## Directories & Data Storage
 
 All CacheLane state is stored locally:
 * **Config file**: `~/.cachelane/config.json`
@@ -161,4 +212,3 @@ All CacheLane state is stored locally:
 * **Claude integration files**:
   * MCP server: `~/.claude/mcp.json`
   * Hook descriptors: `~/.claude/hooks/cachelane.json`
-
