@@ -1,0 +1,24 @@
+Tool name validation warning for "cachelane:stats":
+  - Tool name contains invalid characters: ":"
+  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)
+Tool registration will proceed, but this may cause compatibility issues.
+Consider updating the tool name to conform to the MCP tool naming standard.
+See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details.
+Tool name validation warning for "cachelane:explain":
+  - Tool name contains invalid characters: ":"
+  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)
+Tool registration will proceed, but this may cause compatibility issues.
+Consider updating the tool name to conform to the MCP tool naming standard.
+See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details.
+Tool name validation warning for "cachelane:expand":
+  - Tool name contains invalid characters: ":"
+  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)
+Tool registration will proceed, but this may cause compatibility issues.
+Consider updating the tool name to conform to the MCP tool naming standard.
+See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details.
+Tool name validation warning for "cachelane:health":
+  - Tool name contains invalid characters: ":"
+  - Allowed characters are: A-Z, a-z, 0-9, underscore (_), dash (-), and dot (.)
+Tool registration will proceed, but this may cause compatibility issues.
+Consider updating the tool name to conform to the MCP tool naming standard.
+See SEP: Specify Format for Tool Names (https://github.com/modelcontextprotocol/modelcontextprotocol/issues/986) for more details.

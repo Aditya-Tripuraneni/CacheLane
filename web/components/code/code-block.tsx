@@ -5,12 +5,13 @@ import { Check, Copy } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 type CodeBlockProps = {
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  code?: string;
   className?: string;
   language?: string;
 };
 
-export function CodeBlock({ children, className, language = 'code' }: CodeBlockProps) {
+export function CodeBlock({ children, code, className, language = 'code' }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const codeRef = useRef<HTMLElement>(null);
 
@@ -24,6 +25,8 @@ export function CodeBlock({ children, className, language = 'code' }: CodeBlockP
       });
     }
   };
+
+  const content = code ?? children;
 
   return (
     <div className={cn('group relative', className)}>
@@ -55,7 +58,7 @@ export function CodeBlock({ children, className, language = 'code' }: CodeBlockP
         )}
       </button>
       <code ref={codeRef} className="block">
-        {children}
+        {content}
       </code>
     </div>
   );
