@@ -18,6 +18,7 @@ export const SIDEBAR_NAV: NavGroup[] = [
     title: 'Architecture',
     links: [
       { label: 'Technical Flow & Pruning', href: '/docs/architecture' },
+      { label: 'Stub Lifecycle (Interactive)', href: '/lifecycle' },
     ],
   },
   {
