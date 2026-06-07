@@ -1,7 +1,7 @@
 # CacheLane
 
 [![Node Version](https://img.shields.io/badge/node-%3E%3D20.10-blue.svg)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
 > **"A local cache-discipline layer for Claude Code."**

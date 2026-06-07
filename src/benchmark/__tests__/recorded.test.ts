@@ -56,10 +56,27 @@ describe("recorded benchmark report", () => {
       blocks: 2,
       tool_calls: 1,
     });
-    expect(report.totals.cache_read_tokens).toBeGreaterThan(0);
-    expect(report.totals.effective_cost_units).toBeLessThan(
-      report.totals.baseline_cost_units,
-    );
+
+    // The fixture has one unique block seen in two turns:
+    //   turn 1 → first occurrence  → inputTokens     = T
+    //   turn 2 → duplicate hash    → cacheReadTokens  = T
+    //
+    // Formula (recorded.ts):
+    //   baseline  = T + T          = 2T
+    //   effective = T + 0.1 * T    = 1.1T
+    //   savings   = (2T - 1.1T) / 2T = 0.9/2 = 0.45 (exact, independent of T)
+    //   cache_hit = T / 2T         = 0.5    (exact)
+    //
+    // Using real @anthropic-ai/tokenizer + claude-opus-4-7 (1.15× multiplier):
+    //   base tiktoken("secret prompt fixture ".repeat(20)) = 61
+    //   T = round(61 * 1.15) = 70
+    //   baseline = 140, effective = 77
+    expect(report.totals.input_tokens).toBe(70);
+    expect(report.totals.cache_read_tokens).toBe(70);
+    expect(report.totals.baseline_cost_units).toBe(140);
+    expect(report.totals.effective_cost_units).toBeCloseTo(77, 6);
+    expect(report.totals.savings_ratio).toBeCloseTo(0.45, 2);
+    expect(report.totals.cache_hit_ratio).toBeCloseTo(0.5, 2);
   });
 
   it("does not persist prompt, assistant, or tool content in report outputs", () => {

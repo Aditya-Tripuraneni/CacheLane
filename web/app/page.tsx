@@ -344,7 +344,10 @@ export default function HomePage() {
             <Coffee size={16} className="text-[var(--color-accent)]" />
             cachelane
           </div>
-          <p className="text-xs text-[var(--color-fg-faint)]">
+          <p className="text-xs text-[var(--color-fg-faint)] text-center">
+            Built by Aditya Tripuraneni &amp; Rajan Chavada
+            <span className="hidden sm:inline"> · </span>
+            <br className="sm:hidden" />
             &copy; 2026 CacheLane Project. Distributed under the MIT License.
           </p>
           <div className="flex gap-4 text-xs text-[var(--color-fg-muted)]">

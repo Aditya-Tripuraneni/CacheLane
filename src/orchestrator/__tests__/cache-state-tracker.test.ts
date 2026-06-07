@@ -44,6 +44,22 @@ describe("CacheStateTracker", () => {
     expect(t.get("ws-2", "s-1")?.prefix_hash).toBe("prefix-z");
   });
 
+  // REQ-F-017/018: workspace isolation — state written for ws-A must never
+  // be visible from ws-B, even when the session_id is identical.
+  it("isolates state between workspaces", () => {
+    const t = new CacheStateTracker();
+    t.update("ws-A", "session-1", makeState("ws-A", "A"));
+
+    // Different workspace, same session ID — must return undefined.
+    expect(t.get("ws-B", "session-1")).toBeUndefined();
+
+    // ws-A must still hold its own state unaffected.
+    expect(t.get("ws-A", "session-1")?.prefix_hash).toBe("prefix-A");
+
+    // Different session within ws-A — must also return undefined.
+    expect(t.get("ws-A", "session-2")).toBeUndefined();
+  });
+
   it("isolates entries per session within the same workspace", () => {
     // Two concurrent sessions in ws-1 must never read each other's state.
     // If they shared a slot, session s-2 writing a different middle_hash

@@ -18,6 +18,7 @@ import {
 } from "./config.js";
 import { formatDoctor, runDoctor } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
+import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
 import {
   cachelaneHome,
@@ -228,9 +229,24 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .name("cachelane")
     .description("Cache-aware prompt orchestration for Claude Code")
     .version("0.0.1")
+    .addHelpText("beforeAll", getBannerText())
     .configureOutput({
       writeOut: io.stdout,
       writeErr: io.stderr,
+    });
+
+  program
+    .command("help", { isDefault: false })
+    .description("Show the full command reference")
+    .action(() => {
+      printHelp();
+    });
+
+  program
+    .command("banner")
+    .description("Print the CacheLane welcome banner")
+    .action(() => {
+      printHelp();
     });
 
   program

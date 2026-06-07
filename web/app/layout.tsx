@@ -22,10 +22,10 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'CacheLane — Local Caching and Context Orchestration for Claude Code',
+  title: 'CacheLane: Local Caching and Context Orchestration for Claude Code',
   description:
     'Reduce repeated input token costs in Claude Code by 30% to 60% with local prompt caching, K-pruning, and adaptive keepalive.',
-  metadataBase: new URL('https://cachelane.dev'),
+  metadataBase: new URL('https://cache-lane.vercel.app'),
   openGraph: {
     title: 'CacheLane',
     description: 'Local caching and context orchestration for Claude Code.',

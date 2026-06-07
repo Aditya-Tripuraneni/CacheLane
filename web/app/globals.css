@@ -172,3 +172,54 @@
     margin: 2.5em 0;
   }
 }
+
+/* ---------- Stub-lifecycle animation helpers (warm theme) ---------- */
+@layer utilities {
+  /* syntax tones used inside the animation's code/JSON snippets */
+  .ll-kw { color: var(--color-danger); }
+  .ll-fn { color: var(--color-accent); }
+  .ll-pl { color: var(--color-fg-muted); }
+  .ll-k  { color: var(--color-success); }
+  .ll-s  { color: var(--color-accent); }
+  .ll-c  { color: var(--color-fg-faint); font-style: italic; }
+  .ll-hl { background: color-mix(in oklch, var(--color-warn) 18%, transparent); border-radius: 3px; padding: 0 2px; }
+  .ll-bid  { color: var(--color-warn); font-weight: 700; }
+  .ll-call { color: var(--color-accent); font-weight: 600; }
+
+  /* a freshly-introduced transcript message / changed SQL row */
+  .ll-flash { animation: llFlash 1.1s var(--ease-standard); }
+  @keyframes llFlash {
+    0%   { background: color-mix(in oklch, var(--color-warn) 22%, transparent); }
+    100% { background: transparent; }
+  }
+  .ll-rowflash { animation: llRowFlash 1.2s var(--ease-standard); }
+  @keyframes llRowFlash {
+    0%, 40% { background: color-mix(in oklch, var(--color-warn) 18%, transparent); }
+    100%    { background: transparent; }
+  }
+
+  .ll-codeblock {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--color-fg);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+  }
+  .ll-stubline {
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    background: color-mix(in oklch, var(--color-warn) 8%, transparent);
+    border: 1px dashed color-mix(in oklch, var(--color-warn) 55%, transparent);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--color-warn);
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.55;
+  }
+}

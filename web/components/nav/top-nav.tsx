@@ -31,6 +31,12 @@ export function TopNav() {
               Architecture
             </Link>
             <Link
+              href="/lifecycle"
+              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors font-medium"
+            >
+              Lifecycle
+            </Link>
+            <Link
               href="/docs/cli-reference"
               className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors font-medium"
             >
