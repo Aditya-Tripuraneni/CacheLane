@@ -2,7 +2,7 @@
   "name": "cachelane",
   "version": "1.0.0",
   "description": "Cache-aware prompt orchestration for Claude Code",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "type": "module",
   "bin": {
     "cachelane": "dist/cli/index.js"
