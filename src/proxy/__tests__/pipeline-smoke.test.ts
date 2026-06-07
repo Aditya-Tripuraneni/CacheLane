@@ -140,6 +140,38 @@ afterEach(async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+describe("Pipeline smoke test — 1h TTL cost tier (§cost-formula)", () => {
+  it("computes effective_cost_units = 400 for input(200)*1.0 + cache_creation_1h(100)*2.0", async () => {
+    const req: AnthropicMessagesRequest = {
+      model: "claude-opus-4-7",
+      system: [{ type: "text", text: "system prompt" }],
+      messages: [
+        { role: "user", content: [{ type: "text", text: "msg1" }] },
+      ],
+      max_tokens: 1024,
+    };
+
+    resetFakeUpstream(sseResponseBody({
+      input_tokens: 200,
+      cache_creation_1h_tokens: 100,
+      cache_creation_5m_tokens: 0,
+      cache_read_input_tokens: 0,
+    }));
+    await postMessages(proxyPort, JSON.stringify(req));
+    await waitForTurn(dbPath, "test-session", 1);
+
+    const db = openDatabase(dbPath);
+    try {
+      const turn = db.getTurnByNumber("test-ws", "test-session", 1)!;
+      // 200*1.0 + 0*1.25 + 100*2.0 + 0*0.1 = 400
+      expect(turn.cache_creation_1h_tokens).toBe(100);
+      expect(turn.effective_cost_units).toBe(400);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("Pipeline smoke test (§7.2.1)", () => {
   it("validates the entire pipeline in one shot", async () => {
     const req1: AnthropicMessagesRequest = {

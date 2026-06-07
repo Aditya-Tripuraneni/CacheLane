@@ -70,6 +70,10 @@ export default function ArchitecturePage() {
             <Callout kind="note" title="Pruning State Machine">
               Blocks in the stable region (system prompts, tool definitions, pinned files) are exempt from K-pruning and never expire.
             </Callout>
+            <Callout kind="tip" title="See it step by step">
+              Walk the full stub lifecycle, from created to idle to stubbed to expanded to restored, in an{' '}
+              <a href="/lifecycle">interactive animation</a>, with the prompt, the SQLite row, and the token savings shown side by side at every stage.
+            </Callout>
           </section>
         </FadeIn>
 
