@@ -111,7 +111,7 @@ export function DemoPlayground() {
       breakdown: t.cachelane,
       events: t.cachelaneEvents,
       regions: t.regions,
-      savedUsd: savedUsd > 0 ? savedUsd : 0,
+      savedUsd: savedUsd,
     };
   });
 

@@ -37,6 +37,7 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       tokens: breakdown.cacheRead,
       color: 'var(--color-success)',
       label: 'Cache Read (0.1×)',
+      shortLabel: 'Cache Read',
       percent: (breakdown.cacheRead / safeTotal) * 100,
     },
     {
@@ -44,6 +45,7 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       tokens: breakdown.cacheWrite5m,
       color: 'var(--color-warn)',
       label: 'Cache Write 5m (1.25×)',
+      shortLabel: 'Cache Write (5m)',
       percent: (breakdown.cacheWrite5m / safeTotal) * 100,
     },
     {
@@ -51,6 +53,7 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       tokens: breakdown.cacheWrite1h,
       color: 'var(--color-accent)',
       label: 'Cache Write 1h (2.0×)',
+      shortLabel: 'Cache Write (1h)',
       percent: (breakdown.cacheWrite1h / safeTotal) * 100,
     },
     {
@@ -58,6 +61,7 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       tokens: breakdown.input,
       color: 'var(--color-danger)',
       label: 'Input (1.0×)',
+      shortLabel: 'Input',
       percent: (breakdown.input / safeTotal) * 100,
     },
   ].filter(s => s.tokens > 0);
@@ -86,11 +90,6 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       {/* Header */}
       <div className="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-faint)] flex items-center justify-between">
         <span>Token Flow (This Turn)</span>
-        {savedUsd !== undefined && savedUsd > 0 && (
-          <span className="text-[var(--color-success)] bg-[color-mix(in_oklch,var(--color-success),transparent_85%)] px-1.5 py-0.5 rounded text-[9px]">
-            Saved: ${savedUsd.toFixed(3)}
-          </span>
-        )}
       </div>
 
       {/* Bar container */}
@@ -111,15 +110,16 @@ export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props
       </div>
 
       {/* Labels below bar */}
-      <div className="flex items-center justify-between px-1">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between px-1 gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           {segments.map((segment) => (
-            <div key={segment.key} className="flex items-center gap-1">
+            <div key={segment.key} className="flex items-center gap-1.5">
               <div 
                 className="h-2 w-2 rounded-sm" 
                 style={{ backgroundColor: segment.color }}
               />
               <span className="text-[10px] text-[var(--color-fg-muted)]">
+                <span className="font-medium mr-1">{segment.shortLabel}:</span>
                 {formatTokens(segment.tokens)}
               </span>
             </div>
