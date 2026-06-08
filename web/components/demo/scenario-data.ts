@@ -69,6 +69,18 @@ export function savingsPercent(turns: TurnData[], upTo: number): number {
   return Math.round(((stdCost - clCost) / stdCost) * 100);
 }
 
+export function costInUSD(effectiveUnits: number): number {
+  // Claude 3.5 Sonnet: $3.00 per 1M input tokens.
+  // 1 effectiveUnit = 1 input token equivalent.
+  return (effectiveUnits / 1_000_000) * 3.00;
+}
+
+export function quotaPercent(effectiveUnits: number): number {
+  // Claude Pro allows roughly 45 max-context messages per 5 hours.
+  // We estimate 450,000 effective units = 100% of the 5-hour quota for simple visualization.
+  return Math.min(100, (effectiveUnits / 450_000) * 100);
+}
+
 export const SCENARIO: TurnData[] = [
   {
     turn: 1,

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/cn';
 import type { TokenBreakdown } from './scenario-data';
-import { effectiveCost } from './scenario-data';
+import { effectiveCost, costInUSD } from './scenario-data';
 import { TokenBreakdown as BreakdownCard } from './token-breakdown';
 
 type Props = {
@@ -21,6 +21,7 @@ function formatTokens(n: number): string {
 export function TokenBar({ breakdown, variant, animate = true }: Props) {
   const [showTooltip, setShowTooltip] = useState(false);
   const cost = effectiveCost(breakdown);
+  const costUsd = costInUSD(cost);
   
   // Calculate total visible tokens to compute proportional widths
   // We don't include output tokens in the stacked bar as the focus is on input/cache
@@ -81,6 +82,11 @@ export function TokenBar({ breakdown, variant, animate = true }: Props) {
         )}
       </AnimatePresence>
 
+      {/* Header */}
+      <div className="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-faint)]">
+        Token Flow (This Turn)
+      </div>
+
       {/* Bar container */}
       <div className="flex h-6 w-full overflow-hidden rounded border border-[var(--color-border)] bg-[var(--color-bg-inline)]">
         {segments.map((segment) => (
@@ -116,10 +122,11 @@ export function TokenBar({ breakdown, variant, animate = true }: Props) {
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-[var(--color-fg-faint)]">Effective:</span>
           <span className={cn(
-            "font-mono text-[11px] font-bold",
+            "font-mono text-[11px] font-bold flex items-center gap-1",
             variant === 'standard' ? 'text-[var(--color-danger)]' : 'text-[var(--color-success)]'
           )}>
             {cost.toLocaleString()}
+            <span className="text-[10px] opacity-75 font-normal">(~${costUsd.toFixed(3)})</span>
           </span>
         </div>
       </div>

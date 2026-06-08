@@ -82,9 +82,12 @@ export function MessageBubble({ role, content, toolName, isStubbed, tokensSaved,
         initial={initialAnimation}
         animate={animateAnimation}
         transition={transition}
-        className="my-2 self-start rounded-md border border-[var(--color-border)] bg-[var(--color-bg-elev)] p-3 max-w-[90%]"
+        className="my-2 self-start rounded-md border border-[var(--color-border)] bg-[var(--color-bg-elev)] max-w-[90%] overflow-hidden"
       >
-        <pre className="font-mono text-[11px] text-[var(--color-fg-muted)] overflow-x-auto">
+        <div className="border-b border-[var(--color-border)] bg-[var(--color-bg-inline)] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-faint)]">
+          File / Tool Output
+        </div>
+        <pre className="p-3 font-mono text-[11px] text-[var(--color-fg-muted)] overflow-x-auto">
           {content}
         </pre>
       </motion.div>
