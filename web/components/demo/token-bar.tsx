@@ -11,6 +11,7 @@ type Props = {
   breakdown: TokenBreakdown;
   variant: 'standard' | 'cachelane';
   animate?: boolean;
+  savedUsd?: number;
 };
 
 function formatTokens(n: number): string {
@@ -18,7 +19,7 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-export function TokenBar({ breakdown, variant, animate = true }: Props) {
+export function TokenBar({ breakdown, variant, animate = true, savedUsd }: Props) {
   const [showTooltip, setShowTooltip] = useState(false);
   const cost = effectiveCost(breakdown);
   const costUsd = costInUSD(cost);
@@ -83,8 +84,13 @@ export function TokenBar({ breakdown, variant, animate = true }: Props) {
       </AnimatePresence>
 
       {/* Header */}
-      <div className="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-faint)]">
-        Token Flow (This Turn)
+      <div className="mb-0.5 px-1 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-faint)] flex items-center justify-between">
+        <span>Token Flow (This Turn)</span>
+        {savedUsd !== undefined && savedUsd > 0 && (
+          <span className="text-[var(--color-success)] bg-[color-mix(in_oklch,var(--color-success),transparent_85%)] px-1.5 py-0.5 rounded text-[9px]">
+            Saved: ${savedUsd.toFixed(3)}
+          </span>
+        )}
       </div>
 
       {/* Bar container */}

@@ -25,6 +25,7 @@ type TurnStats = {
   breakdown: TokenBreakdown;
   events: CachelaneEvent[];
   regions?: RegionSnapshot;
+  savedUsd?: number;
 };
 
 type Props = {
@@ -171,10 +172,11 @@ export function ConversationPanel({
                     breakdown={stats.breakdown}
                     variant={variant}
                     animate
+                    savedUsd={stats.savedUsd}
                   />
 
-                  {/* CacheLane events */}
-                  {!isStandard && stats.events.length > 0 && (
+                  {/* CacheLane events (only for the latest turn to reduce clutter) */}
+                  {!isStandard && stats.events.length > 0 && msg.turnIndex === currentTurn && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {stats.events.map((event, i) => (
                         <motion.span
@@ -198,9 +200,15 @@ export function ConversationPanel({
 
       {/* Region visualizer footer (CacheLane only) */}
       {!isStandard && latestStats?.regions && (
-        <div className="border-t border-[var(--color-border)] p-3 max-h-56 overflow-y-auto shrink-0 bg-[var(--color-bg)]">
-          <CacheRegionVisualizer regions={latestStats.regions} />
-        </div>
+        <details className="group shrink-0 border-t border-[var(--color-border)] bg-[var(--color-bg)]" open>
+          <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--color-bg-elev)] hover:text-[var(--color-fg)]">
+            <span>Cache Regions Snapshot</span>
+            <span className="transition-transform group-open:rotate-180">▼</span>
+          </summary>
+          <div className="max-h-56 overflow-y-auto p-3 pt-1">
+            <CacheRegionVisualizer regions={latestStats.regions} />
+          </div>
+        </details>
       )}
     </div>
   );

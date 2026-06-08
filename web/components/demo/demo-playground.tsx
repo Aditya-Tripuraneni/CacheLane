@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Lightbulb } from 'lucide-react';
-import { SCENARIO, cumulativeCost } from './scenario-data';
+import { SCENARIO, cumulativeCost, costInUSD, effectiveCost } from './scenario-data';
 import type { DemoMessage } from './conversation-panel';
 import { ConversationPanel } from './conversation-panel';
 import { PromptInput } from './prompt-input';
@@ -101,12 +101,19 @@ export function DemoPlayground() {
     events: [],
   }));
 
-  const cachelaneTurnStats = SCENARIO.slice(0, currentTurn).map((t) => ({
-    turnIndex: t.turn,
-    breakdown: t.cachelane,
-    events: t.cachelaneEvents,
-    regions: t.regions,
-  }));
+  const cachelaneTurnStats = SCENARIO.slice(0, currentTurn).map((t) => {
+    const stdUnits = effectiveCost(t.standard);
+    const clUnits = effectiveCost(t.cachelane);
+    const savedUsd = costInUSD(stdUnits - clUnits);
+    
+    return {
+      turnIndex: t.turn,
+      breakdown: t.cachelane,
+      events: t.cachelaneEvents,
+      regions: t.regions,
+      savedUsd: savedUsd > 0 ? savedUsd : 0,
+    };
+  });
 
   const costData = SCENARIO.map((t) => ({
     turn: t.turn,
