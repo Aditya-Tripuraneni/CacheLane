@@ -47,6 +47,7 @@ export function CacheRegionVisualizer({ regions, animate = true }: Props) {
       description: regions.stable.description,
       icon: regions.stable.cached ? Lock : Unlock,
       breakpoint: 'Prefix Breakpoint',
+      helpText: 'System instructions and tools. Cached upfront at 1.25x write cost, read at 0.1x.',
     },
     {
       key: 'semi',
@@ -62,6 +63,7 @@ export function CacheRegionVisualizer({ regions, animate = true }: Props) {
       icon: regions.semi.cached ? Lock : Unlock,
       breakpoint: 'Middle Breakpoint',
       stubbedBlocks: regions.semi.stubbedBlocks,
+      helpText: 'Past conversation turns. Middle breakpoint caches this growing history.',
     },
     {
       key: 'volatile',
@@ -76,6 +78,7 @@ export function CacheRegionVisualizer({ regions, animate = true }: Props) {
       description: regions.volatile.description,
       icon: Unlock,
       breakpoint: null,
+      helpText: 'Latest user prompt & new tool results. Cannot be cached yet (1.0x cost).',
     },
   ];
 
@@ -130,10 +133,15 @@ export function CacheRegionVisualizer({ regions, animate = true }: Props) {
                   </span>
                 </div>
 
-                {/* Description */}
-                <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-fg-faint)]">
-                  {region.description}
-                </p>
+                {/* Description & Help */}
+                <div className="mt-1 flex flex-col gap-1">
+                  <p className="text-[11px] font-medium leading-relaxed text-[var(--color-fg)]">
+                    {region.description}
+                  </p>
+                  <p className="text-[10px] leading-relaxed text-[var(--color-fg-faint)] italic">
+                    {region.helpText}
+                  </p>
+                </div>
 
                 {/* Cost multiplier */}
                 <div className="mt-1.5 flex items-center justify-between">

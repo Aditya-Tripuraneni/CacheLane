@@ -198,7 +198,7 @@ export function ConversationPanel({
 
       {/* Region visualizer footer (CacheLane only) */}
       {!isStandard && latestStats?.regions && (
-        <div className="border-t border-[var(--color-border)] p-3">
+        <div className="border-t border-[var(--color-border)] p-3 max-h-56 overflow-y-auto shrink-0 bg-[var(--color-bg)]">
           <CacheRegionVisualizer regions={latestStats.regions} />
         </div>
       )}
