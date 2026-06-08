@@ -37,6 +37,13 @@ export function TopNav() {
               Lifecycle
             </Link>
             <Link
+              href="/demo"
+              className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors font-medium flex items-center gap-1"
+            >
+              Demo
+              <span className="rounded bg-[var(--color-accent)] px-1 py-0.5 text-[8px] font-bold text-white leading-none">NEW</span>
+            </Link>
+            <Link
               href="/docs/cli-reference"
               className="text-[var(--color-fg-muted)] hover:text-[var(--color-fg)] transition-colors font-medium"
             >

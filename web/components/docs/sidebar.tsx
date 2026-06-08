@@ -22,6 +22,12 @@ export const SIDEBAR_NAV: NavGroup[] = [
     ],
   },
   {
+    title: 'Playground',
+    links: [
+      { label: 'Interactive Demo', href: '/demo' },
+    ],
+  },
+  {
     title: 'CLI Reference',
     links: [
       { label: 'CLI Commands Index', href: '/docs/cli-reference' },
