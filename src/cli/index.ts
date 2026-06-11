@@ -502,8 +502,9 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
 
   program
     .command("hook-mutate")
-    .description("Hook-based mutation engine for Claude Code (AWS Bedrock mode)")
+    .description("(DEPRECATED) Hook-based mutation engine for Claude Code. Use CacheLane proxy instead.")
     .action(async () => {
+      io.stderr("[cachelane] WARNING: hook-mutate is deprecated and cannot perform pruning. Please use the CacheLane proxy instead.\n");
       if (process.stdin.isTTY) {
         io.stderr("[cachelane] hook-mutate expects JSON payload on stdin. It is hanging because it is waiting for input.\nUsage example: echo '{\"prompt\":\"test\"}' | cachelane hook-mutate\n");
         process.exitCode = 1;

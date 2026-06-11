@@ -1,0 +1,26 @@
+{
+  "id": "multi-turn-code-review",
+  "title": "Multi-Turn Code Review Session",
+  "description": "Simulates a 5-turn code review session where system context and file reads persist across turns, exercising cache hit detection.",
+  "prompt": "Review the caching module across multiple files and suggest improvements to the TTL handling.",
+  "workspace_files": [
+    {
+      "path": "src/cache-policy.ts",
+      "content": "export function ttlForPrefix(kind: 'ephemeral_5m' | 'ephemeral_1h'): number { return kind === 'ephemeral_1h' ? 3600 : 300; } The keepalive worker should avoid refreshing one hour prefixes unless the policy explicitly enables it. This module handles all cache TTL computations including adaptive scheduling, prefix token counting, and tier assignment based on the large_prefix_threshold_tokens configuration value."
+    },
+    {
+      "path": "src/orchestrator/index.ts",
+      "content": "import { CacheStateTracker } from './cache-state-tracker'; import { findRegionBoundaries } from './region-boundaries'; import { placeBreakpoints } from './breakpoint-placer'; import { mutateRequest } from './request-mutator'; export function orchestrate(input, tracker, keepaliveConfig) { const boundaries = findRegionBoundaries(input.message_classifications); const breakpoints = placeBreakpoints(input.original_request, boundaries, undefined); const mutated = mutateRequest(input.original_request, boundaries, breakpoints); return { request: mutated, mutated: true, prefix_hash: breakpoints.prefix_hash }; }"
+    },
+    {
+      "path": "src/classifier/rules.ts",
+      "content": "const RULES = [stubRule, claudeMdRule, projectRulesRule, systemPromptRule, toolSchemaRule, fileReadRule, toolUseResultPairRule, priorTurnRule, retrievalResultRule, toolOutputRule, userMessageRule]; export function runRules(input, config) { for (const rule of RULES) { const result = rule(input, config); if (result) return result; } return null; }"
+    },
+    {
+      "path": "CLAUDE.md",
+      "content": "Cachelane is a local MCP server plus Claude Code hooks that intercepts traffic between Claude Code and api.anthropic.com to reduce input-token costs. Two mechanisms: Cache-aware orchestration reorders prompt blocks into three volatility regions and places two cache_control breakpoints so the Anthropic prompt cache fires at 0.1x instead of 1.0x. K-pruning replaces tool-call result blocks idle for K or more consecutive turns with refetchable stubs."
+    }
+  ],
+  "expected_references": ["src/cache-policy.ts", "src/orchestrator/index.ts", "src/classifier/rules.ts"],
+  "tags": ["multi-turn", "code-review", "cache-exercise"]
+}

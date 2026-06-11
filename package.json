@@ -21,7 +21,9 @@
   },
   "dependencies": {
     "@anthropic-ai/tokenizer": "^0.0.4",
+    "@aws-sdk/credential-provider-node": "^3.972.55",
     "@modelcontextprotocol/sdk": "^1.0.0",
+    "aws4": "^1.13.2",
     "better-sqlite3": "^11.10.0",
     "cachelane": "^1.0.0",
     "commander": "^12.0.0",
@@ -30,6 +32,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
+    "@types/aws4": "^1.11.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.14.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",

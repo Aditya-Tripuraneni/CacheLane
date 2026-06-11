@@ -11,6 +11,8 @@ import { logger } from "../logger/index.js";
 import type { AnthropicMessagesRequest, AnthropicMessage } from "../orchestrator/index.js";
 import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
+import aws4 from "aws4";
+import { defaultProvider } from "@aws-sdk/credential-provider-node";
 
 const DEFAULT_UPSTREAM_HOST = "api.anthropic.com";
 const DEFAULT_UPSTREAM_PORT = 443;
@@ -222,17 +224,19 @@ export function createProxyServer(
   return http.createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => {
+    req.on("end", async () => {
       const body = Buffer.concat(chunks);
       const method = req.method ?? "GET";
       const reqPath = req.url ?? "/";
 
       logger.info("incoming", JSON.stringify({ method, path: reqPath }));
 
-      // Only intercept POST /v1/messages — strip query string before matching
+      // Only intercept POST /v1/messages or Bedrock /model/* paths
       // Claude Code appends ?beta=true and similar query params
       const pathOnly = reqPath.split("?")[0];
-      if (method !== "POST" || pathOnly !== "/v1/messages") {
+      const isBedrock = pathOnly?.startsWith("/model/");
+      
+      if (method !== "POST" || (pathOnly !== "/v1/messages" && !isBedrock)) {
         forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
         return;
       }
@@ -304,10 +308,43 @@ export function createProxyServer(
           }));
         }
 
-        const upstreamHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
-        upstreamHeaders["content-length"] = String(forwardBody.length);
+        let finalUpstream = upstream;
+        let finalHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
+        finalHeaders["content-length"] = String(forwardBody.length);
 
-        proxyAndRecord(upstream, method, reqPath, upstreamHeaders, forwardBody, res, {
+        if (isBedrock) {
+          const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-1";
+          finalUpstream = {
+            ...upstream,
+            host: `bedrock-runtime.${region}.amazonaws.com`,
+          };
+          
+          // AWS SigV4 signer will set these headers
+          delete finalHeaders["host"];
+          delete finalHeaders["connection"];
+          
+          const credentials = await defaultProvider()();
+          
+          const signOpts = {
+            host: finalUpstream.host,
+            path: buildUpstreamPath(finalUpstream, reqPath),
+            service: "bedrock",
+            region,
+            method,
+            body: forwardBody,
+            headers: finalHeaders,
+          };
+          
+          aws4.sign(signOpts, {
+            accessKeyId: credentials.accessKeyId,
+            secretAccessKey: credentials.secretAccessKey,
+            sessionToken: credentials.sessionToken,
+          });
+          
+          finalHeaders = signOpts.headers as Record<string, string>;
+        }
+
+        proxyAndRecord(finalUpstream, method, reqPath, finalHeaders, forwardBody, res, {
           db,
           workspaceId,
           sessionId,
