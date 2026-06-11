@@ -214,11 +214,12 @@ export function createProxyServer(
   tracker: CacheStateTracker,
 ): http.Server {
   const workspaceId = opts.workspace_id ?? process.env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
+  const config = loadConfig(opts.config_path ?? defaultConfigPath());
   const upstream: UpstreamTarget = {
-    host: opts.upstream?.host ?? DEFAULT_UPSTREAM_HOST,
-    port: opts.upstream?.port ?? DEFAULT_UPSTREAM_PORT,
-    ssl: opts.upstream?.ssl ?? true,
-    path_prefix: opts.upstream?.path_prefix ?? "",
+    host: opts.upstream?.host ?? config.proxy.upstream_host ?? DEFAULT_UPSTREAM_HOST,
+    port: opts.upstream?.port ?? config.proxy.upstream_port ?? DEFAULT_UPSTREAM_PORT,
+    ssl: opts.upstream?.ssl ?? config.proxy.upstream_ssl ?? true,
+    path_prefix: opts.upstream?.path_prefix ?? config.proxy.upstream_path_prefix ?? "",
   };
 
   return http.createServer((req, res) => {
