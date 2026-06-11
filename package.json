@@ -1,6 +1,6 @@
 {
   "name": "cachelane",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Cache-aware prompt orchestration for Claude Code",
   "license": "Apache-2.0",
   "type": "module",
@@ -23,6 +23,7 @@
     "@anthropic-ai/tokenizer": "^0.0.4",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^11.10.0",
+    "cachelane": "^1.0.0",
     "commander": "^12.0.0",
     "ulid": "^2.3.0",
     "zod": "^3.23.0"
