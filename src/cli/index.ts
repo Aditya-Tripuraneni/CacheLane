@@ -4,8 +4,8 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { Command } from "commander";
-import { loadConfig } from "../config/index.js";
-import { openDatabase } from "../storage/index.js";
+import { loadConfig, defaultWorkspaceId } from "../config/index.js";
+import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
 import { startProxy } from "../proxy/server.js";
 import {
@@ -212,9 +212,53 @@ async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, un
     const calls = parseTranscriptApiCalls(content);
     if (calls.length === 0) return;
 
-    // The inline HTTP proxy owns turn recording, including accurate token
-    // counts, cache savings, and pruned block counts. The hook remains a
-    // fail-open no-op for older Claude Code registrations.
+    // In Hook mode (e.g. Bedrock), we bypass the HTTP proxy, so we must
+    // record turn statistics directly from the Claude Code transcript.
+    const db = openDatabase(cachelaneDbPath(env));
+    try {
+      const workspaceId = env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
+      const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : "default";
+
+      for (const call of calls) {
+        if (!db.getTurn(call.id)) {
+          const effective = calculateEffectiveCostUnits({
+            input_tokens: call.input_tokens,
+            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+          });
+
+          const currentTurn = db.allocateTurnNumber({
+            workspace_id: workspaceId,
+            session_id: sessionId,
+            updated_at: call.created_at,
+          });
+
+          db.insertTurn({
+            id: call.id,
+            workspace_id: workspaceId,
+            session_id: sessionId,
+            turn_number: currentTurn,
+            model: call.model,
+            input_tokens: call.input_tokens,
+            output_tokens: call.output_tokens,
+            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+            effective_cost_units: effective,
+            prefix_breakpoint_hash: null,
+            middle_breakpoint_hash: null,
+            pruned_blocks_count: 0,
+            keepalive_pings_since_last_turn: 0,
+            signals: JSON.stringify(["mode:hook"]),
+            request_mutated: 1, // Indicate it was processed in hook mode
+            created_at: call.created_at,
+          });
+        }
+      }
+    } finally {
+      db.close();
+    }
   } catch (err) {
     process.stderr.write(`[cachelane] hook error: ${err instanceof Error ? err.message : String(err)}\n`);
   }
@@ -439,6 +483,11 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .description("Claude Code hook entrypoints")
     .argument("<name>", "hook event name (user-prompt-submit or stop)")
     .action(async (name: string) => {
+      if (process.stdin.isTTY) {
+        io.stderr(`[cachelane] hook ${name} expects JSON payload on stdin. It is hanging because it is waiting for input.\n`);
+        process.exitCode = 1;
+        return;
+      }
       const input = await readStdin();
       if (input.trim().length === 0) return;
       try {
@@ -455,6 +504,11 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .command("hook-mutate")
     .description("Hook-based mutation engine for Claude Code (AWS Bedrock mode)")
     .action(async () => {
+      if (process.stdin.isTTY) {
+        io.stderr("[cachelane] hook-mutate expects JSON payload on stdin. It is hanging because it is waiting for input.\nUsage example: echo '{\"prompt\":\"test\"}' | cachelane hook-mutate\n");
+        process.exitCode = 1;
+        return;
+      }
       const input = await readStdin();
       if (input.trim().length === 0) return;
       try {
