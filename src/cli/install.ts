@@ -121,8 +121,9 @@ export function mergeBaseUrlIntoSettings(settingsPath: string, port: number): bo
   const env: JsonObject = isObject(settings.env) ? { ...(settings.env as JsonObject) } : {};
   const intended = baseUrlFor(port);
 
-  if (env.ANTHROPIC_BASE_URL === intended) return false;
+  if (env.ANTHROPIC_BASE_URL === intended && env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME === intended) return false;
   env.ANTHROPIC_BASE_URL = intended;
+  env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME = intended;
   settings.env = env;
   writeJsonObject(settingsPath, settings);
   return true;
@@ -150,15 +151,26 @@ function mergeUpstreamFromSettingsIntoConfig(
   return true;
 }
 
-// Removes our ANTHROPIC_BASE_URL entry; deletes the env block if it becomes
+// Removes our base URL entries; deletes the env block if it becomes
 // empty. Returns true iff the file was modified.
 export function removeBaseUrlFromSettings(settingsPath: string): boolean {
   if (!fs.existsSync(settingsPath)) return false;
   const settings = readJsonObject(settingsPath);
   if (!isObject(settings.env)) return false;
   const env: JsonObject = { ...(settings.env as JsonObject) };
-  if (!("ANTHROPIC_BASE_URL" in env)) return false;
-  delete env.ANTHROPIC_BASE_URL;
+  let changed = false;
+  
+  if ("ANTHROPIC_BASE_URL" in env) {
+    delete env.ANTHROPIC_BASE_URL;
+    changed = true;
+  }
+  if ("AWS_ENDPOINT_URL_BEDROCK_RUNTIME" in env) {
+    delete env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME;
+    changed = true;
+  }
+  
+  if (!changed) return false;
+
   if (Object.keys(env).length === 0) {
     delete settings.env;
   } else {
