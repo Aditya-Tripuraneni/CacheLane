@@ -560,9 +560,6 @@ function proxyAndRecord(
 function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
   try {
     const text = raw.toString("utf-8");
-    try {
-      fs.writeFileSync("/Users/jimmy/Documents/CacheLane/raw_response.txt", text);
-    } catch {}
     interface UsageFields {
       input_tokens?: number;
       output_tokens?: number;

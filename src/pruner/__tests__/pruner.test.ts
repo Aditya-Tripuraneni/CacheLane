@@ -216,6 +216,68 @@ describe("materializePrunedBlocks", () => {
     });
   });
 
+  it("preserves tool_result type and tool_use_id when stubbing (regression: 400 concurrency fix)", () => {
+    const request: MaterializableRequest = {
+      model: "claude-opus-4-7",
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "assistant",
+          content: [
+            { type: "tool_use", id: "toolu_01ABC", name: "Read", input: { path: "src/auth.ts" } },
+            { type: "tool_use", id: "toolu_01DEF", name: "Read", input: { path: "src/db.ts" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_01ABC", content: "file contents of auth.ts..." },
+            { type: "tool_result", tool_use_id: "toolu_01DEF", content: "file contents of db.ts..." },
+          ],
+        },
+      ],
+    };
+
+    const out = materializePrunedBlocks({
+      request,
+      decisions: [
+        {
+          block_id: "toolu_01ABC",
+          action: "stubbed",
+          reason: "unused_turns >= 3",
+          stub_summary: "tool_output tool:read:src/auth.ts (250 tokens elided)",
+          refetch_handle: "tool:read:src/auth.ts",
+          kind: "tool_output",
+        },
+      ],
+      block_placements: [
+        {
+          block_id: "toolu_01ABC",
+          message_index: 1,
+          content_index: 0,
+          kind: "tool_output",
+          volatility: "VOLATILE",
+          is_pinned: false,
+          refetch_handle: "tool:read:src/auth.ts",
+        },
+      ],
+    });
+
+    const stubbedBlock = out.messages[1]?.content[0] as any;
+    // CRITICAL: type must remain "tool_result", not "text"
+    expect(stubbedBlock.type).toBe("tool_result");
+    // CRITICAL: tool_use_id must be preserved for API pairing
+    expect(stubbedBlock.tool_use_id).toBe("toolu_01ABC");
+    // Content should be the stub text
+    expect(stubbedBlock.content).toContain("[stub:");
+
+    // The un-pruned block must be untouched
+    const keptBlock = out.messages[1]?.content[1] as any;
+    expect(keptBlock.type).toBe("tool_result");
+    expect(keptBlock.tool_use_id).toBe("toolu_01DEF");
+    expect(keptBlock.content).toBe("file contents of db.ts...");
+  });
+
   it("requires explicit placement metadata for pruned decisions", () => {
     expect(() =>
       materializePrunedBlocks({

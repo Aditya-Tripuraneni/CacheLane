@@ -170,4 +170,229 @@ describe("mutateRequest", () => {
       expect(Array.isArray(content) && (content[0] as { cache_control?: unknown }).cache_control).toBeUndefined();
     });
   });
+
+  // Regression: Claude Code sends parallel tool_result blocks in arbitrary order
+  // (whichever file read finishes first). The Anthropic API requires tool_result
+  // blocks to appear in the same order as the preceding assistant's tool_use blocks.
+  // mutateRequest must transparently fix this ordering.
+  describe("reorders tool_result blocks to match preceding tool_use order (400 concurrency fix)", () => {
+    it("sorts scrambled tool_result blocks to match tool_use order", () => {
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read files" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_A", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_B", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_C", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              // Scrambled: C, A, B instead of A, B, C
+              { type: "tool_result", tool_use_id: "toolu_C", content: "content C" },
+              { type: "tool_result", tool_use_id: "toolu_A", content: "content A" },
+              { type: "tool_result", tool_use_id: "toolu_B", content: "content B" },
+            ],
+          },
+          { role: "assistant", content: [{ type: "text", text: "Done." }] },
+          { role: "user", content: [{ type: "text", text: "thanks" }] },
+        ],
+        max_tokens: 1024,
+      };
+
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(request, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      const userMsg = out.messages[2];
+      expect(Array.isArray(userMsg?.content)).toBe(true);
+      const results = userMsg!.content as any[];
+      expect(results[0].tool_use_id).toBe("toolu_A");
+      expect(results[1].tool_use_id).toBe("toolu_B");
+      expect(results[2].tool_use_id).toBe("toolu_C");
+      // Content must follow the IDs
+      expect(results[0].content).toBe("content A");
+      expect(results[1].content).toBe("content B");
+      expect(results[2].content).toBe("content C");
+    });
+
+    it("leaves already-ordered tool_result blocks unchanged", () => {
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read files" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_X", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_Y", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "toolu_X", content: "X" },
+              { type: "tool_result", tool_use_id: "toolu_Y", content: "Y" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(request, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      const results = out.messages[2]!.content as any[];
+      expect(results[0].tool_use_id).toBe("toolu_X");
+      expect(results[1].tool_use_id).toBe("toolu_Y");
+    });
+
+    it("preserves non-tool_result blocks (text) in position while reordering tool_results", () => {
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_1", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_2", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "interleaved text" },
+              // Reversed order
+              { type: "tool_result", tool_use_id: "toolu_2", content: "two" },
+              { type: "tool_result", tool_use_id: "toolu_1", content: "one" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(request, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      const content = out.messages[2]!.content as any[];
+      // Text block stays in position 0
+      expect(content[0].type).toBe("text");
+      expect(content[0].text).toBe("interleaved text");
+      // tool_results are now sorted: toolu_1 before toolu_2
+      expect(content[1].tool_use_id).toBe("toolu_1");
+      expect(content[1].content).toBe("one");
+      expect(content[2].tool_use_id).toBe("toolu_2");
+      expect(content[2].content).toBe("two");
+    });
+
+    it("handles multiple assistant→user tool pairs in the same conversation", () => {
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "start" }] },
+          // First tool pair
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_P", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_Q", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              // Q before P (scrambled)
+              { type: "tool_result", tool_use_id: "toolu_Q", content: "Q" },
+              { type: "tool_result", tool_use_id: "toolu_P", content: "P" },
+            ],
+          },
+          // Second tool pair
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_R", name: "Bash", input: {} },
+              { type: "tool_use", id: "toolu_S", name: "Bash", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              // S before R (scrambled)
+              { type: "tool_result", tool_use_id: "toolu_S", content: "S" },
+              { type: "tool_result", tool_use_id: "toolu_R", content: "R" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      const out = mutateRequest(request, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      // First pair: P before Q
+      const pair1 = out.messages[2]!.content as any[];
+      expect(pair1[0].tool_use_id).toBe("toolu_P");
+      expect(pair1[1].tool_use_id).toBe("toolu_Q");
+
+      // Second pair: R before S
+      const pair2 = out.messages[4]!.content as any[];
+      expect(pair2[0].tool_use_id).toBe("toolu_R");
+      expect(pair2[1].tool_use_id).toBe("toolu_S");
+    });
+
+    it("does not mutate the original request when reordering", () => {
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_1", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_2", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "toolu_2", content: "two" },
+              { type: "tool_result", tool_use_id: "toolu_1", content: "one" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      const originalJson = JSON.stringify(request);
+      const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+      mutateRequest(request, boundaries, {
+        ...breakpoints,
+        include_middle_breakpoint: false,
+      });
+
+      // Original must not be mutated
+      expect(JSON.stringify(request)).toBe(originalJson);
+    });
+  });
 });

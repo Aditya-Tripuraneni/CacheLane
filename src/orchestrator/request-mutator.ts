@@ -43,6 +43,41 @@ export function mutateRequest(
     }),
   };
 
+  // FIX: Claude Code has a bug where parallel tool results are sometimes sent out of order.
+  // Anthropic API rejects this with 400 "tool use concurrency issues".
+  // We transparently sort the tool_result blocks to match the preceding tool_use order!
+  for (let i = 1; i < out.messages.length; i++) {
+    const msg = out.messages[i];
+    const prevMsg = out.messages[i - 1];
+    
+    if (msg?.role === "user" && Array.isArray(msg.content) && prevMsg?.role === "assistant" && Array.isArray(prevMsg.content)) {
+      const toolUseOrder = prevMsg.content
+        .filter((c): c is any => c.type === "tool_use")
+        .map(c => c.id);
+        
+      if (toolUseOrder.length > 0) {
+        const orderMap = new Map(toolUseOrder.map((id, idx) => [id, idx]));
+        
+        // Extract all tool_result blocks
+        const toolResults = msg.content.filter((c: any) => c.type === "tool_result");
+        // Sort ONLY the tool_results based on the tool_use_id order
+        toolResults.sort((a: any, b: any) => {
+          const idxA = orderMap.has(a.tool_use_id) ? orderMap.get(a.tool_use_id)! : 999;
+          const idxB = orderMap.has(b.tool_use_id) ? orderMap.get(b.tool_use_id)! : 999;
+          return idxA - idxB;
+        });
+        
+        // Rebuild the array by popping from our sorted toolResults queue
+        msg.content = msg.content.map((c: any) => {
+          if (c.type === "tool_result") {
+            return toolResults.shift()!;
+          }
+          return c;
+        });
+      }
+    }
+  }
+
   // Prefix breakpoint: marker on the last tool, or the last system block if no tools.
   if (out.tools && out.tools.length > 0) {
     const lastTool = out.tools.at(-1);
