@@ -27,9 +27,9 @@ describe("hook-mutate", () => {
     expect(result).toBeUndefined();
   });
 
-  it("should return undefined if no mutation is applied to the prompt", async () => {
+  it("should return the mutated string if mutation is enabled", async () => {
     const result = await handleHookMutate({}, { prompt: "Hello world" });
-    expect(result).toBeUndefined();
+    expect(result).toBe("Hello world\n\n[CacheLane: Pruning active... (AWS Hook Mode)]");
   });
 
   // Note: Once actual mutation logic is implemented in handleHookMutate,

@@ -225,9 +225,13 @@ let dbPath: string;
 let proxy: http.Server;
 let proxyPort: number;
 
+let originalEnvCachelaneHome: string | undefined;
+
 beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cachelane-proxy-test-"));
   dbPath = path.join(tmpDir, "test.db");
+  originalEnvCachelaneHome = process.env.CACHELANE_HOME;
+  process.env.CACHELANE_HOME = tmpDir;
   resetFakeUpstream();
 
   proxy = startProxy({
@@ -244,6 +248,11 @@ afterEach(async () => {
   vi.restoreAllMocks();
   await closeServer(proxy);
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (originalEnvCachelaneHome !== undefined) {
+    process.env.CACHELANE_HOME = originalEnvCachelaneHome;
+  } else {
+    delete process.env.CACHELANE_HOME;
+  }
 });
 
 // ---------------------------------------------------------------------------

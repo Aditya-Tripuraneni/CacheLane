@@ -76,7 +76,7 @@ describe("mergeBaseUrlIntoSettings", () => {
   });
 
   it("is idempotent — re-running with the URL already correct does not modify the file", () => {
-    writeSettings({ env: { ANTHROPIC_BASE_URL: EXPECTED_URL } });
+    writeSettings({ env: { ANTHROPIC_BASE_URL: EXPECTED_URL, AWS_ENDPOINT_URL_BEDROCK_RUNTIME: EXPECTED_URL } });
     const mtimeBefore = fs.statSync(settingsPath).mtimeMs;
 
     // Force a measurable mtime gap before re-running.
