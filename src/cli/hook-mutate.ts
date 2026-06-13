@@ -11,40 +11,20 @@ export async function handleHookMutate(
   const prompt = typeof parsed.prompt === "string" ? parsed.prompt : null;
   if (!prompt) return undefined;
 
-  // TODO: We will need to decide whether we mutate the `prompt` string
-  // or return a full JSON structure depending on Claude Code's capabilities.
-  // For now, we will demonstrate modifying the text prompt to include 
-  // CacheLane injected metadata.
-
-  let mutatedPrompt = prompt;
-
+  // hook-mutate is DEPRECATED: the supported path is the CacheLane proxy, which
+  // performs real cache-aware orchestration + K-pruning on the request body. The
+  // UserPromptSubmit hook cannot prune tool_result blocks (it only sees the typed
+  // prompt string), so it must NOT mutate the prompt — injecting text here would
+  // pollute the user's actual prompt for no benefit. This is now a no-op that only
+  // verifies config/storage are reachable, then fails open.
   try {
-    const dbPath = cachelaneDbPath(env);
-    const configPath = cachelaneConfigPath(env);
-    const db = openDatabase(dbPath);
-    const config = loadConfig(configPath);
-
-    // Apply any prompt-level mutations here based on DB stats or pruning logic
-    if (config.features.mutation_enabled) {
-      // Temporary mutation: append a cache marker or instruction.
-      // In a full implementation, we'd invoke the classifier/pruner here
-      // and append instructions to the prompt to ignore pruned tools.
-      
-      mutatedPrompt = prompt + "\n\n[CacheLane: Pruning active... (AWS Hook Mode)]";
-    }
-
+    const db = openDatabase(cachelaneDbPath(env));
+    loadConfig(cachelaneConfigPath(env));
     db.close();
   } catch (err) {
     logger.error("hook-mutate pipeline error", err instanceof Error ? err.message : String(err));
-    // Fail open
-    return undefined;
   }
 
-  // If the prompt changed, return it so Claude Code uses the mutated prompt.
-  if (mutatedPrompt !== prompt) {
-    return mutatedPrompt;
-  }
-
-  // No mutation, return undefined
+  // No prompt mutation — let Claude Code use the prompt unchanged.
   return undefined;
 }

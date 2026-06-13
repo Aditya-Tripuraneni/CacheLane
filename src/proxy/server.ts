@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
 import { randomUUID, createHash } from "node:crypto";
@@ -8,6 +7,7 @@ import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
 import { logger } from "../logger/index.js";
+import { eventStreamToSSE, isEventStreamContentType } from "./eventstream.js";
 import type { AnthropicMessagesRequest, AnthropicMessage } from "../orchestrator/index.js";
 import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
@@ -17,6 +17,123 @@ import { defaultProvider } from "@aws-sdk/credential-provider-node";
 const DEFAULT_UPSTREAM_HOST = "api.anthropic.com";
 const DEFAULT_UPSTREAM_PORT = 443;
 const DEFAULT_PORT = 7332;
+
+/**
+ * Inbound auth/signing headers that MUST be stripped before CacheLane re-signs a
+ * request for AWS Bedrock. In Bedrock mode Claude Code's AWS SDK already SigV4-signs
+ * the request, so the inbound request carries a stale `authorization`, `x-amz-date`,
+ * `x-amz-content-sha256` (hash over the ORIGINAL body), and `x-amz-security-token`.
+ * aws4 treats any pre-existing value as authoritative — so leaving them in makes it
+ * sign the wrong body hash / token / timestamp → guaranteed 403 from Bedrock. We also
+ * strip Anthropic-issued credentials so the user's `x-api-key` never reaches AWS.
+ */
+const BEDROCK_STRIP_HEADERS = [
+  "authorization",
+  "x-amz-date",
+  "x-amz-content-sha256",
+  "x-amz-security-token",
+  "x-amzn-trace-id",
+  "x-api-key",
+  "anthropic-version",
+  "anthropic-beta",
+  "anthropic-dangerous-direct-browser-access",
+] as const;
+
+function scrubClientAuthHeaders(headers: Record<string, string>): Record<string, string> {
+  const out = { ...headers };
+  for (const key of Object.keys(out)) {
+    const lower = key.toLowerCase();
+    if (
+      (BEDROCK_STRIP_HEADERS as readonly string[]).includes(lower) ||
+      lower.startsWith("x-stainless-")
+    ) {
+      delete out[key];
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve the AWS region for signing. Claude Code encodes the target region in the
+ * credential scope of its inbound SigV4 `authorization` header
+ * (`Credential=AK.../20260612/us-west-2/bedrock/aws4_request`); prefer that so we
+ * sign for the region Claude Code actually targeted. Fall back to proxy env, then
+ * us-east-1.
+ */
+function resolveBedrockRegion(headers: Record<string, string>): string {
+  const auth = headers["authorization"];
+  if (typeof auth === "string") {
+    const match = /\/\d{8}\/([a-z0-9-]+)\/bedrock\//.exec(auth);
+    if (match?.[1]) return match[1];
+  }
+  return process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-1";
+}
+
+// Memoize the AWS credential provider once at module scope. defaultProvider()
+// returns a provider that caches + refreshes credentials internally; constructing
+// a fresh one per request (the old behavior) discarded that cache and walked the
+// full provider chain (env → SSO → IMDS → STS) on every turn.
+let memoizedCredentialProvider: ReturnType<typeof defaultProvider> | null = null;
+function getCredentialProvider(): ReturnType<typeof defaultProvider> {
+  if (memoizedCredentialProvider === null) {
+    memoizedCredentialProvider = defaultProvider();
+  }
+  return memoizedCredentialProvider;
+}
+
+/**
+ * Build the Bedrock upstream target + SigV4-signed headers for a request. Used by
+ * both the main path and the fail-open catch so Bedrock requests are always routed
+ * to the Bedrock host and signed correctly with the proxy's own credentials.
+ */
+async function signForBedrock(params: {
+  upstream: UpstreamTarget;
+  reqPath: string;
+  method: string;
+  body: Buffer;
+  baseHeaders: Record<string, string>;
+}): Promise<{ upstream: UpstreamTarget; headers: Record<string, string> }> {
+  const region = resolveBedrockRegion(params.baseHeaders);
+  // Default upstream (api.anthropic.com) means "no explicit Bedrock endpoint
+  // configured" → rewrite to the regional Bedrock host. An explicitly-configured
+  // upstream host (a Bedrock gateway, or a test fake) is honored as-is, and we
+  // sign for that host so the SigV4 Host header matches what we connect to.
+  const targetHost =
+    params.upstream.host === DEFAULT_UPSTREAM_HOST
+      ? `bedrock-runtime.${region}.amazonaws.com`
+      : params.upstream.host;
+  const finalUpstream: UpstreamTarget = {
+    ...params.upstream,
+    host: targetHost,
+  };
+
+  // Strip the client's stale auth/signing headers; aws4 will regenerate
+  // x-amz-date, x-amz-content-sha256, x-amz-security-token, and authorization.
+  const headers = scrubClientAuthHeaders(params.baseHeaders);
+  delete headers["host"];
+  delete headers["connection"];
+  headers["content-length"] = String(params.body.length);
+
+  const credentials = await getCredentialProvider()();
+
+  const signOpts = {
+    host: finalUpstream.host,
+    path: buildUpstreamPath(finalUpstream, params.reqPath),
+    service: "bedrock",
+    region,
+    method: params.method,
+    body: params.body,
+    headers,
+  };
+
+  aws4.sign(signOpts, {
+    accessKeyId: credentials.accessKeyId,
+    secretAccessKey: credentials.secretAccessKey,
+    sessionToken: credentials.sessionToken,
+  });
+
+  return { upstream: finalUpstream, headers: signOpts.headers as Record<string, string> };
+}
 
 /**
  * Derive a per-message turn number by counting user messages.
@@ -319,35 +436,15 @@ export function createProxyServer(
         finalHeaders["content-length"] = String(forwardBody.length);
 
         if (isBedrock) {
-          const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION || "us-east-1";
-          finalUpstream = {
-            ...upstream,
-            host: `bedrock-runtime.${region}.amazonaws.com`,
-          };
-          
-          // AWS SigV4 signer will set these headers
-          delete finalHeaders["host"];
-          delete finalHeaders["connection"];
-          
-          const credentials = await defaultProvider()();
-          
-          const signOpts = {
-            host: finalUpstream.host,
-            path: buildUpstreamPath(finalUpstream, reqPath),
-            service: "bedrock",
-            region,
+          const signed = await signForBedrock({
+            upstream,
+            reqPath,
             method,
             body: forwardBody,
-            headers: finalHeaders,
-          };
-          
-          aws4.sign(signOpts, {
-            accessKeyId: credentials.accessKeyId,
-            secretAccessKey: credentials.secretAccessKey,
-            sessionToken: credentials.sessionToken,
+            baseHeaders: headersFromIncoming(req),
           });
-          
-          finalHeaders = signOpts.headers as Record<string, string>;
+          finalUpstream = signed.upstream;
+          finalHeaders = signed.headers;
         }
 
         proxyAndRecord(finalUpstream, method, reqPath, finalHeaders, forwardBody, res, {
@@ -378,9 +475,33 @@ export function createProxyServer(
           model: parsed.model || "unknown",
           signals: ["error:fallback"],
         });
-        const fallbackHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
+        // Fail-open must still reach a destination that can serve the request.
+        // For Bedrock (/model/*) that means routing to the Bedrock host AND
+        // signing the (unmutated) body — an unsigned request to api.anthropic.com
+        // would be a hard error, not a graceful pass-through.
+        let fallbackUpstream = upstream;
+        let fallbackHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
         fallbackHeaders["content-length"] = String(body.length);
-        proxyAndRecord(upstream, method, reqPath, fallbackHeaders, body, res, {
+        if (isBedrock) {
+          try {
+            const signed = await signForBedrock({
+              upstream,
+              reqPath,
+              method,
+              body,
+              baseHeaders: headersFromIncoming(req),
+            });
+            fallbackUpstream = signed.upstream;
+            fallbackHeaders = signed.headers;
+          } catch (signErr) {
+            logger.error(
+              "bedrock fail-open signing error",
+              signErr instanceof Error ? signErr.message : String(signErr),
+              signErr,
+            );
+          }
+        }
+        proxyAndRecord(fallbackUpstream, method, reqPath, fallbackHeaders, body, res, {
           db,
           workspaceId,
           sessionId,
@@ -493,13 +614,14 @@ function proxyAndRecord(
 ): void {
   const responseChunks: Buffer[] = [];
   let finished = false;
+  let responseContentType: string | undefined;
 
   const finish = (status: "recorded" | "error") => {
     if (finished) return;
     finished = true;
     if (status === "recorded") {
       const responseBody = Buffer.concat(responseChunks);
-      recordUsageFromResponse(responseBody, recordOpts);
+      recordUsageFromResponse(responseBody, recordOpts, responseContentType);
       extractAndInsertToolResults(body, recordOpts);
     }
     // DB lifetime is owned by the caller (startProxy or tryBindProxy);
@@ -510,6 +632,8 @@ function proxyAndRecord(
     upstream,
     { path: buildUpstreamPath(upstream, path), method, headers: { ...headers, host: upstream.host } },
     (upstreamRes) => {
+      const ct = upstreamRes.headers["content-type"];
+      responseContentType = Array.isArray(ct) ? ct[0] : ct;
       res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers as http.OutgoingHttpHeaders);
 
       upstreamRes.on("data", (chunk: Buffer) => {
@@ -557,9 +681,18 @@ function proxyAndRecord(
   upstreamReq.end();
 }
 
-function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
+function recordUsageFromResponse(
+  raw: Buffer,
+  opts: RecordOptions,
+  contentType?: string,
+): void {
   try {
-    const text = raw.toString("utf-8");
+    // AWS Bedrock streaming returns binary event-stream framing rather than
+    // text SSE. Decode it into Anthropic-style `data: {json}` lines so the same
+    // parser below extracts usage. Falls back to raw text for Anthropic SSE/JSON.
+    const text = isEventStreamContentType(contentType)
+      ? eventStreamToSSE(raw)
+      : raw.toString("utf-8");
     interface UsageFields {
       input_tokens?: number;
       output_tokens?: number;
@@ -586,6 +719,9 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
         if (evt.type === "message_delta" && evt.usage) {
           const delta = evt.usage as UsageFields;
           if (usage !== null) {
+            // For each field, prefer the delta value when present, else keep the
+            // value seeded by message_start. (The `?? usage` fallback already
+            // applies the delta whenever it is non-nullish.)
             usage = {
               ...usage,
               input_tokens: delta.input_tokens ?? usage.input_tokens,
@@ -595,11 +731,6 @@ function recordUsageFromResponse(raw: Buffer, opts: RecordOptions): void {
               cache_creation_1h_tokens: delta.cache_creation_1h_tokens ?? usage.cache_creation_1h_tokens,
               cache_read_input_tokens: delta.cache_read_input_tokens ?? usage.cache_read_input_tokens,
             };
-            if (delta.input_tokens) usage.input_tokens = delta.input_tokens;
-            if (delta.cache_creation_input_tokens) usage.cache_creation_input_tokens = delta.cache_creation_input_tokens;
-            if (delta.cache_creation_5m_tokens) usage.cache_creation_5m_tokens = delta.cache_creation_5m_tokens;
-            if (delta.cache_creation_1h_tokens) usage.cache_creation_1h_tokens = delta.cache_creation_1h_tokens;
-            if (delta.cache_read_input_tokens) usage.cache_read_input_tokens = delta.cache_read_input_tokens;
           } else {
             usage = { ...delta };
           }

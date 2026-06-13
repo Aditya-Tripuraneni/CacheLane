@@ -109,7 +109,8 @@ describe("handlePreRequest", () => {
       type: "text",
       text: "[stub:01KPREQ1] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KPREQ1)",
     });
-    expect(result.request.tools?.at(-1)?.cache_control).toEqual({
+    // H5: prefix marker lands on the last system block (covers tools + system).
+    expect(result.request.system?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "5m",
     });

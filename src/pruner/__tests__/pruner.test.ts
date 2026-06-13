@@ -263,7 +263,8 @@ describe("materializePrunedBlocks", () => {
       ],
     });
 
-    const stubbedBlock = out.messages[1]?.content[0] as any;
+    type BlockView = { type: string; tool_use_id?: string; content?: unknown };
+    const stubbedBlock = out.messages[1]?.content[0] as BlockView;
     // CRITICAL: type must remain "tool_result", not "text"
     expect(stubbedBlock.type).toBe("tool_result");
     // CRITICAL: tool_use_id must be preserved for API pairing
@@ -272,7 +273,7 @@ describe("materializePrunedBlocks", () => {
     expect(stubbedBlock.content).toContain("[stub:");
 
     // The un-pruned block must be untouched
-    const keptBlock = out.messages[1]?.content[1] as any;
+    const keptBlock = out.messages[1]?.content[1] as BlockView;
     expect(keptBlock.type).toBe("tool_result");
     expect(keptBlock.tool_use_id).toBe("toolu_01DEF");
     expect(keptBlock.content).toBe("file contents of db.ts...");

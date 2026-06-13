@@ -43,7 +43,8 @@ describe("orchestrate (integration)", () => {
     const tracker = new CacheStateTracker();
     const out = orchestrate(input, tracker);
     expect(out.mutated).toBe(true);
-    expect(out.request.tools?.at(-1)?.cache_control).toEqual({
+    // H5: prefix marker lands on the last system block (covers tools + system).
+    expect(out.request.system?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "5m",
     });
@@ -121,7 +122,7 @@ describe("orchestrate (integration)", () => {
       large_prefix_threshold_tokens: 1,
     });
 
-    expect(out.request.tools?.at(-1)?.cache_control).toEqual({
+    expect(out.request.system?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "1h",
     });

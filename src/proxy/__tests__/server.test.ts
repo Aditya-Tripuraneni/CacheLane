@@ -301,6 +301,138 @@ describe("proxy pipeline integration", () => {
     });
   });
 
+  describe("tool_result reorder — end-to-end through the proxy (400 concurrency fix)", () => {
+    it("reorders scrambled tool_result blocks in the forwarded body to match tool_use order", async () => {
+      const scrambled: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        tools: [{ name: "Read", input_schema: { type: "object" } }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read files" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_A", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_B", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_C", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              // Out of order: C, A, B — the Anthropic API would 400 on this.
+              { type: "tool_result", tool_use_id: "toolu_C", content: "C" },
+              { type: "tool_result", tool_use_id: "toolu_A", content: "A" },
+              { type: "tool_result", tool_use_id: "toolu_B", content: "B" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      await postMessages(proxyPort, JSON.stringify(scrambled));
+
+      expect(lastCaptured).not.toBeNull();
+      const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+      const results = forwarded.messages[2]!.content as { type: string; tool_use_id?: string }[];
+      const ids = results.filter((c) => c.type === "tool_result").map((c) => c.tool_use_id);
+      expect(ids).toEqual(["toolu_A", "toolu_B", "toolu_C"]);
+    });
+
+    // The original 400 was PRUNING-induced. This locks the guarantee that the two
+    // mutating paths COMPOSED — pruning (stub-in-place) then reordering — never
+    // break tool_use/tool_result pairing. Blocks toolu_A and toolu_C are prunable
+    // (seeded in the DB, unused_turns >= k); toolu_B has no DB row so it stays raw.
+    // The tool_results arrive scrambled (C, A, B). Forwarded body must: keep all
+    // three tool_results, ordered A, B, C, each still paired by tool_use_id, with
+    // A and C replaced by stubs and B left intact.
+    it("keeps every tool_result paired and ordered when pruning AND reordering compose", async () => {
+      const db = openDatabase(dbPath);
+      const now = Date.now();
+      for (const id of ["toolu_A", "toolu_C"]) {
+        db.insertBlock({
+          id,
+          workspace_id: "test-ws",
+          session_id: "test-session",
+          content_hash: id.padEnd(64, "0").slice(0, 64),
+          kind: "tool_output",
+          volatility: "VOLATILE",
+          is_pinned: false,
+          token_count: 250,
+          added_at_turn: 1,
+          last_referenced_at_turn: 1,
+          unused_turns: 3,
+          is_stub: false,
+          stub_summary: null,
+          refetch_handle: `tool:read:${id}`,
+          restored_at_turn: null,
+          created_at: now,
+          updated_at: now,
+        });
+      }
+      db.close();
+
+      const scrambledPrunable: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        tools: [{ name: "Read", input_schema: { type: "object" } }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read files" }] },
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_A", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_B", name: "Read", input: {} },
+              { type: "tool_use", id: "toolu_C", name: "Read", input: {} },
+            ],
+          },
+          {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "toolu_C", content: "raw C contents" },
+              { type: "tool_result", tool_use_id: "toolu_A", content: "raw A contents" },
+              { type: "tool_result", tool_use_id: "toolu_B", content: "raw B contents" },
+            ],
+          },
+        ],
+        max_tokens: 1024,
+      };
+
+      await postMessages(proxyPort, JSON.stringify(scrambledPrunable));
+
+      expect(lastCaptured).not.toBeNull();
+      const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+      const userMsg = forwarded.messages[2]!;
+      const content = userMsg.content as {
+        type: string;
+        tool_use_id?: string;
+        content?: unknown;
+      }[];
+
+      // Pairing invariant: every tool_use in the assistant turn has exactly one
+      // tool_result in the following user turn (no block dropped by pruning).
+      const toolResults = content.filter((c) => c.type === "tool_result");
+      expect(toolResults).toHaveLength(3);
+
+      // Ordering invariant: tool_results match the tool_use order (no 400).
+      expect(toolResults.map((c) => c.tool_use_id)).toEqual([
+        "toolu_A",
+        "toolu_B",
+        "toolu_C",
+      ]);
+
+      // Type invariant: pruning kept the tool_result type (not converted to text),
+      // so the API can still pair them.
+      expect(toolResults.every((c) => c.type === "tool_result")).toBe(true);
+
+      // Pruned blocks (A, C) are stubs; the unseeded block (B) is untouched.
+      const byId = new Map(toolResults.map((c) => [c.tool_use_id, c]));
+      expect(String(byId.get("toolu_A")!.content)).toContain("[stub:");
+      expect(String(byId.get("toolu_C")!.content)).toContain("[stub:");
+      expect(byId.get("toolu_B")!.content).toBe("raw B contents");
+    });
+  });
+
   describe("turn recording — non-streaming response", () => {
     it("records one turn in the DB after a successful non-streaming response", async () => {
       await postMessages(proxyPort, JSON.stringify(buildMessagesRequest()));

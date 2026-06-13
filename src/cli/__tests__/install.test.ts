@@ -95,21 +95,21 @@ describe("validateInstall", () => {
   it("does not throw when settings.json has a different ANTHROPIC_BASE_URL (preserves for custom upstreams)", () => {
     writeSettings({ env: { ANTHROPIC_BASE_URL: "http://example.com:9999" } });
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).not.toThrow();
+    expect(() => validateInstall(settingsPath)).not.toThrow();
   });
 
   it("throws when settings.json is malformed JSON", () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath, "{not json");
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(/Invalid JSON/);
+    expect(() => validateInstall(settingsPath)).toThrow(/Invalid JSON/);
   });
 
   it("aborts when settings.json has a malformed env (non-object)", () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath, JSON.stringify({ env: "oops" }));
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(
+    expect(() => validateInstall(settingsPath)).toThrow(
       /env.*not an object/i,
     );
   });
@@ -120,7 +120,7 @@ describe("validateInstall", () => {
     fs.writeFileSync(settingsPath, "{malformed");
     const before = fs.readFileSync(settingsPath, "utf-8");
 
-    expect(() => validateInstall(settingsPath, EXPECTED_PORT)).toThrow(/Invalid JSON/);
+    expect(() => validateInstall(settingsPath)).toThrow(/Invalid JSON/);
 
     expect(fs.readFileSync(settingsPath, "utf-8")).toBe(before);
   });
@@ -198,5 +198,123 @@ describe("installCachelane / uninstallCachelane URL wiring", () => {
 
     const settings = readSettings() as { env?: { ANTHROPIC_BASE_URL?: string } };
     expect(settings.env?.ANTHROPIC_BASE_URL).toBeUndefined();
+  });
+});
+
+describe("Bedrock endpoint wiring", () => {
+  const VPCE_URL =
+    "https://vpce-004a35abae14f32c1-qlj1ojuh.bedrock-runtime.us-east-1.vpce.amazonaws.com";
+
+  // BV1: a Bedrock user routes through a VPC PrivateLink endpoint stored in
+  // ANTHROPIC_BEDROCK_BASE_URL (NOT ANTHROPIC_BASE_URL). Install must capture
+  // that host as the proxy upstream, otherwise signForBedrock falls back to the
+  // public bedrock-runtime host which is unreachable inside the corporate VPC.
+  it("install captures ANTHROPIC_BEDROCK_BASE_URL as the proxy upstream in Bedrock mode", () => {
+    writeSettings({
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BEDROCK_BASE_URL: VPCE_URL,
+      },
+    });
+
+    installCachelane(env);
+
+    const config = readCachelaneConfig() as {
+      proxy: {
+        upstream_host: string;
+        upstream_port: number;
+        upstream_ssl: boolean;
+        upstream_path_prefix: string;
+      };
+    };
+    expect(config.proxy.upstream_host).toBe(
+      "vpce-004a35abae14f32c1-qlj1ojuh.bedrock-runtime.us-east-1.vpce.amazonaws.com",
+    );
+    expect(config.proxy.upstream_port).toBe(443);
+    expect(config.proxy.upstream_ssl).toBe(true);
+    expect(config.proxy.upstream_path_prefix).toBe("");
+  });
+
+  // Routing: Claude Code in Bedrock mode honors ANTHROPIC_BEDROCK_BASE_URL for its
+  // endpoint. Install must repoint it at the local proxy or the proxy is bypassed.
+  it("install rewrites ANTHROPIC_BEDROCK_BASE_URL to the local proxy in Bedrock mode", () => {
+    writeSettings({
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BEDROCK_BASE_URL: VPCE_URL,
+      },
+    });
+
+    installCachelane(env);
+
+    const settings = readSettings() as {
+      env: {
+        ANTHROPIC_BEDROCK_BASE_URL: string;
+        AWS_ENDPOINT_URL_BEDROCK_RUNTIME: string;
+      };
+    };
+    expect(settings.env.ANTHROPIC_BEDROCK_BASE_URL).toBe(EXPECTED_URL);
+    expect(settings.env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME).toBe(EXPECTED_URL);
+  });
+
+  it("install preserves CLAUDE_CODE_USE_BEDROCK and ANTHROPIC_CUSTOM_HEADERS untouched", () => {
+    const customHeaders =
+      "X-Amzn-Bedrock-GuardrailIdentifier: ccav1o7z6tq6\nX-Amzn-Bedrock-GuardrailVersion: 10";
+    writeSettings({
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BEDROCK_BASE_URL: VPCE_URL,
+        ANTHROPIC_CUSTOM_HEADERS: customHeaders,
+        AWS_REGION: "us-east-1",
+      },
+    });
+
+    installCachelane(env);
+
+    const settings = readSettings() as {
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: string;
+        ANTHROPIC_CUSTOM_HEADERS: string;
+        AWS_REGION: string;
+      };
+    };
+    expect(settings.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+    expect(settings.env.ANTHROPIC_CUSTOM_HEADERS).toBe(customHeaders);
+    expect(settings.env.AWS_REGION).toBe("us-east-1");
+  });
+
+  it("install is idempotent in Bedrock mode (upstream not clobbered on re-run)", () => {
+    writeSettings({
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BEDROCK_BASE_URL: VPCE_URL,
+      },
+    });
+
+    installCachelane(env);
+    installCachelane(env);
+
+    const config = readCachelaneConfig() as { proxy: { upstream_host: string } };
+    // Second run sees the already-rewritten local URL and must NOT capture
+    // 127.0.0.1 as the upstream — the vpce host must survive.
+    expect(config.proxy.upstream_host).toBe(
+      "vpce-004a35abae14f32c1-qlj1ojuh.bedrock-runtime.us-east-1.vpce.amazonaws.com",
+    );
+  });
+
+  it("uninstall removes ANTHROPIC_BEDROCK_BASE_URL", () => {
+    writeSettings({
+      env: {
+        CLAUDE_CODE_USE_BEDROCK: "1",
+        ANTHROPIC_BEDROCK_BASE_URL: VPCE_URL,
+      },
+    });
+    installCachelane(env);
+    uninstallCachelane(env);
+
+    const settings = readSettings() as {
+      env?: { ANTHROPIC_BEDROCK_BASE_URL?: string };
+    };
+    expect(settings.env?.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined();
   });
 });

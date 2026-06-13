@@ -75,6 +75,17 @@ function baseUrlFor(port: number): string {
   return `http://127.0.0.1:${port}`;
 }
 
+// Bedrock mode is signalled by CLAUDE_CODE_USE_BEDROCK or the presence of a
+// Bedrock endpoint override. In this mode Claude Code resolves its endpoint from
+// ANTHROPIC_BEDROCK_BASE_URL (often a VPC PrivateLink host) rather than
+// ANTHROPIC_BASE_URL, so that var is the source of truth for the real upstream
+// and the one we must repoint at the local proxy.
+function isBedrockMode(env: JsonObject): boolean {
+  if ("ANTHROPIC_BEDROCK_BASE_URL" in env) return true;
+  const flag = env.CLAUDE_CODE_USE_BEDROCK;
+  return flag === "1" || flag === 1 || flag === true;
+}
+
 function isLocalProxyUrl(value: string, port: number): boolean {
   try {
     const url = new URL(value);
@@ -104,14 +115,12 @@ function upstreamFromBaseUrl(value: unknown, port: number): Partial<CachelaneCon
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function validateInstall(settingsPath: string, intendedPort: number): void {
-  // We still parse to ensure it's valid JSON and structurally sound.
+export function validateInstall(settingsPath: string): void {
+  // Parse to ensure settings.json is valid JSON and structurally sound. Port
+  // validation was intentionally removed — we preserve a custom ANTHROPIC_BASE_URL
+  // (e.g. GLM) during merge rather than throwing here.
   const settings = readJsonObject(settingsPath);
   assertEnvIsObjectOrAbsent(settings, settingsPath);
-  
-  // Allow overriding ANTHROPIC_BASE_URL for custom upstreams (e.g. GLM).
-  // We will preserve the path during merge instead of throwing here.
 }
 
 // Idempotent merge — returns true iff the file was modified.
@@ -120,6 +129,23 @@ export function mergeBaseUrlIntoSettings(settingsPath: string, port: number): bo
   assertEnvIsObjectOrAbsent(settings, settingsPath);
   const env: JsonObject = isObject(settings.env) ? { ...(settings.env as JsonObject) } : {};
   const intended = baseUrlFor(port);
+
+  // In Bedrock mode Claude Code resolves its endpoint from ANTHROPIC_BEDROCK_BASE_URL,
+  // so repoint that (and the AWS SDK's AWS_ENDPOINT_URL_BEDROCK_RUNTIME) at the proxy.
+  // Otherwise repoint the standard ANTHROPIC_BASE_URL.
+  if (isBedrockMode(env)) {
+    if (
+      env.ANTHROPIC_BEDROCK_BASE_URL === intended &&
+      env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME === intended
+    ) {
+      return false;
+    }
+    env.ANTHROPIC_BEDROCK_BASE_URL = intended;
+    env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME = intended;
+    settings.env = env;
+    writeJsonObject(settingsPath, settings);
+    return true;
+  }
 
   if (env.ANTHROPIC_BASE_URL === intended && env.AWS_ENDPOINT_URL_BEDROCK_RUNTIME === intended) return false;
   env.ANTHROPIC_BASE_URL = intended;
@@ -137,7 +163,13 @@ function mergeUpstreamFromSettingsIntoConfig(
   const settings = readJsonObject(settingsPath);
   assertEnvIsObjectOrAbsent(settings, settingsPath);
   const env = isObject(settings.env) ? settings.env : {};
-  const upstream = upstreamFromBaseUrl(env.ANTHROPIC_BASE_URL, config.proxy.port);
+  // In Bedrock mode the real endpoint lives in ANTHROPIC_BEDROCK_BASE_URL (a VPC
+  // PrivateLink host). Capture THAT as the upstream so signForBedrock connects to
+  // and signs for the reachable endpoint instead of the public bedrock-runtime host.
+  const sourceUrl = isBedrockMode(env)
+    ? env.ANTHROPIC_BEDROCK_BASE_URL
+    : env.ANTHROPIC_BASE_URL;
+  const upstream = upstreamFromBaseUrl(sourceUrl, config.proxy.port);
   if (upstream === null) return false;
 
   const rawConfig = readJsonObject(configPath);
@@ -162,6 +194,10 @@ export function removeBaseUrlFromSettings(settingsPath: string): boolean {
   
   if ("ANTHROPIC_BASE_URL" in env) {
     delete env.ANTHROPIC_BASE_URL;
+    changed = true;
+  }
+  if ("ANTHROPIC_BEDROCK_BASE_URL" in env) {
+    delete env.ANTHROPIC_BEDROCK_BASE_URL;
     changed = true;
   }
   if ("AWS_ENDPOINT_URL_BEDROCK_RUNTIME" in env) {
@@ -275,7 +311,7 @@ export function installCachelane(env: NodeJS.ProcessEnv = process.env): InstallR
   const settingsPath = claudeSettingsPath(env);
 
   // ── Validate BEFORE any mutation — fail-open guarantees no partial writes.
-  validateInstall(settingsPath, config.proxy.port);
+  validateInstall(settingsPath);
 
   const nodeExec = (() => { try { return fs.realpathSync(process.execPath); } catch { return process.execPath; } })();
   const cliScript = (() => {

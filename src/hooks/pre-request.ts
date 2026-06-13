@@ -210,9 +210,8 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       placementIds.has(d.block_id),
     );
 
-    // DEBUG: log pruner decision details to diagnose pruned_blocks_count=0
     if (pruneResult.decisions.length > 0 || input.block_placements.length > 0) {
-      logger.info("pruner debug", JSON.stringify({
+      logger.debug("pruner decision", JSON.stringify({
         session_id: input.session_id,
         turn: input.current_turn,
         k: input.pruner.k,
