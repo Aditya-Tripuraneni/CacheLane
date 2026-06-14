@@ -58,6 +58,46 @@ export interface KeepaliveWorkerOptions {
   now_ms?: () => number;
   /** Max ms to wait for a single ping before treating it as failed. Default 5000. */
   ping_timeout_ms?: number;
+  /**
+   * Polling cadence for the periodic timer. Defaults to a value derived from
+   * config that is guaranteed to land inside the tightest ping window — see
+   * {@link computeTickIntervalMs}.
+   */
+  tick_interval_ms?: number;
+}
+
+const FIVE_MIN_TTL_MS = TTL_MS["5m"];
+const MIN_TICK_INTERVAL_MS = 5_000;
+
+/**
+ * The periodic timer must fire often enough that at least one tick lands inside
+ * the pingable window before a prefix expires. For a 5m prefix, a session is
+ * pingable while idle in `[max(idle_threshold, TTL - interval), TTL)`. Ticking
+ * at `interval_seconds` (the near-expiry threshold) is too coarse: with the
+ * defaults that window is only 60s wide while the timer fires every 150s, so no
+ * tick ever lands in it and the cache silently expires unpinged.
+ *
+ * We derive the cadence from the *narrowest* (5m-tier) window and tick at half
+ * its width so a tick is guaranteed inside, clamped to a sane floor and never
+ * coarser than the near-expiry threshold.
+ */
+export function computeTickIntervalMs(
+  config: CachelaneConfig["keepalive"],
+): number {
+  const intervalMs = config.interval_seconds * 1000;
+  const idleThresholdMs = config.idle_threshold_seconds * 1000;
+  const windowStartMs = Math.max(idleThresholdMs, FIVE_MIN_TTL_MS - intervalMs);
+  const windowWidthMs = FIVE_MIN_TTL_MS - windowStartMs;
+
+  // Misconfigured so the window is empty (idle_threshold >= TTL): nothing is
+  // pingable for a 5m prefix anyway, so just poll at the floor cadence.
+  if (windowWidthMs <= 0) return MIN_TICK_INTERVAL_MS;
+
+  const halfWindowMs = Math.floor(windowWidthMs / 2);
+  return Math.min(
+    intervalMs,
+    Math.max(MIN_TICK_INTERVAL_MS, halfWindowMs),
+  );
 }
 
 export function decideKeepalive(
@@ -120,6 +160,7 @@ export class KeepaliveWorker {
   private readonly logger: KeepaliveLogger;
   private readonly nowMs: () => number;
   private readonly pingTimeoutMs: number;
+  private readonly tickIntervalMs: number;
   private readonly inFlight = new Set<string>();
   private timer: NodeJS.Timeout | null = null;
 
@@ -130,6 +171,8 @@ export class KeepaliveWorker {
     this.logger = options.logger ?? console;
     this.nowMs = options.now_ms ?? Date.now;
     this.pingTimeoutMs = options.ping_timeout_ms ?? 5_000;
+    this.tickIntervalMs =
+      options.tick_interval_ms ?? computeTickIntervalMs(options.config);
   }
 
   private executorWithTimeout(
@@ -153,7 +196,7 @@ export class KeepaliveWorker {
         void this.tick().catch((err: unknown) => {
           this.logger.error("[cachelane] keepalive tick failed", err);
         }),
-      this.config.interval_seconds * 1000,
+      this.tickIntervalMs,
     );
     this.timer.unref?.();
   }
