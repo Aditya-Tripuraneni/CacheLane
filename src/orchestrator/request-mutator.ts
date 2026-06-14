@@ -2,10 +2,20 @@ import type {
   AnthropicCacheControl,
   AnthropicMessageContent,
   AnthropicMessagesRequest,
+  AnthropicToolResultContent,
+  AnthropicToolUseContent,
   Breakpoints,
   PrefixState,
   RegionBoundaries,
 } from "./types.js";
+
+function isToolUse(c: AnthropicMessageContent): c is AnthropicToolUseContent {
+  return c.type === "tool_use";
+}
+
+function isToolResult(c: AnthropicMessageContent): c is AnthropicToolResultContent {
+  return c.type === "tool_result";
+}
 
 const MIDDLE_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
 
@@ -52,39 +62,44 @@ export function mutateRequest(
     
     if (msg?.role === "user" && Array.isArray(msg.content) && prevMsg?.role === "assistant" && Array.isArray(prevMsg.content)) {
       const toolUseOrder = prevMsg.content
-        .filter((c): c is any => c.type === "tool_use")
-        .map(c => c.id);
-        
+        .filter(isToolUse)
+        .map((c) => c.id);
+
       if (toolUseOrder.length > 0) {
         const orderMap = new Map(toolUseOrder.map((id, idx) => [id, idx]));
-        
+        // Unmatched tool_results sort to the end (stable sort preserves their
+        // relative order); this index is larger than any real tool_use index.
+        const unmatchedRank = toolUseOrder.length;
+
         // Extract all tool_result blocks
-        const toolResults = msg.content.filter((c: any) => c.type === "tool_result");
+        const toolResults = msg.content.filter(isToolResult);
         // Sort ONLY the tool_results based on the tool_use_id order
-        toolResults.sort((a: any, b: any) => {
-          const idxA = orderMap.has(a.tool_use_id) ? orderMap.get(a.tool_use_id)! : 999;
-          const idxB = orderMap.has(b.tool_use_id) ? orderMap.get(b.tool_use_id)! : 999;
+        toolResults.sort((a, b) => {
+          const idxA = orderMap.get(a.tool_use_id) ?? unmatchedRank;
+          const idxB = orderMap.get(b.tool_use_id) ?? unmatchedRank;
           return idxA - idxB;
         });
-        
+
         // Rebuild the array by popping from our sorted toolResults queue
-        msg.content = msg.content.map((c: any) => {
-          if (c.type === "tool_result") {
-            return toolResults.shift()!;
-          }
-          return c;
-        });
+        msg.content = msg.content.map((c) =>
+          isToolResult(c) ? toolResults.shift()! : c,
+        );
       }
     }
   }
 
-  // Prefix breakpoint: marker on the last tool, or the last system block if no tools.
-  if (out.tools && out.tools.length > 0) {
-    const lastTool = out.tools.at(-1);
-    if (lastTool) lastTool.cache_control = prefixMarker;
-  } else if (out.system && out.system.length > 0) {
+  // Prefix breakpoint: place on the LAST system block when present, else the last
+  // tool. Anthropic's cache order is tools → system → messages, and a breakpoint
+  // caches everything up to and including the marked block. Marking the last system
+  // block therefore caches BOTH tools and system; marking the last tool would leave
+  // the (often large, stable) system prompt uncached. Falls back to the last tool
+  // when there are no system blocks.
+  if (out.system && out.system.length > 0) {
     const lastSystem = out.system.at(-1);
     if (lastSystem) lastSystem.cache_control = prefixMarker;
+  } else if (out.tools && out.tools.length > 0) {
+    const lastTool = out.tools.at(-1);
+    if (lastTool) lastTool.cache_control = prefixMarker;
   }
 
   // Middle breakpoint: marker on the last content item of the last SEMI message.

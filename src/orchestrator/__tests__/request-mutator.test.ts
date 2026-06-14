@@ -6,6 +6,10 @@ import type {
   RegionBoundaries,
 } from "../types.js";
 
+// Loose read-only view of a message content block for assertions across the
+// tool_use/tool_result/text union, without `any`.
+type ContentView = { type: string; text?: string; tool_use_id?: string; content?: unknown };
+
 const baseRequest: AnthropicMessagesRequest = {
   model: "claude-opus-4-7",
   system: [
@@ -31,21 +35,41 @@ const breakpoints: Breakpoints = {
 };
 
 describe("mutateRequest", () => {
-  it("adds cache_control marker to the last tool (end of prefix)", () => {
+  // H5: when BOTH system and tools are present, the prefix marker goes on the last
+  // SYSTEM block (later in Anthropic's tools→system→messages cache order), so the
+  // cached prefix covers both tools AND system. The last tool must NOT be marked.
+  it("adds cache_control marker to the last system block (end of prefix) when tools present", () => {
     const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
     const out = mutateRequest(baseRequest, boundaries, breakpoints);
-    expect(out.tools?.at(-1)?.cache_control).toEqual({
+    expect(out.system?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "5m",
     });
+    expect(out.tools?.at(-1)?.cache_control).toBeUndefined();
   });
 
   it("uses the supplied prefix TTL for the prefix marker", () => {
     const boundaries: RegionBoundaries = { middle_end_in_messages: 2 };
     const out = mutateRequest(baseRequest, boundaries, breakpoints, "1h");
-    expect(out.tools?.at(-1)?.cache_control).toEqual({
+    expect(out.system?.at(-1)?.cache_control).toEqual({
       type: "ephemeral",
       ttl: "1h",
+    });
+  });
+
+  it("falls back to the last tool for the prefix marker when no system blocks present", () => {
+    const toolsOnlyRequest: AnthropicMessagesRequest = {
+      ...baseRequest,
+      system: undefined,
+    };
+    const boundaries: RegionBoundaries = { middle_end_in_messages: null };
+    const out = mutateRequest(toolsOnlyRequest, boundaries, {
+      ...breakpoints,
+      include_middle_breakpoint: false,
+    });
+    expect(out.tools?.at(-1)?.cache_control).toEqual({
+      type: "ephemeral",
+      ttl: "5m",
     });
   });
 
@@ -112,7 +136,7 @@ describe("mutateRequest", () => {
   // tools→system→messages processing order). mutateRequest must strip all
   // existing markers before placing its own.
   describe("strips pre-existing cache_control markers before placing its own", () => {
-    it("removes existing 5m markers from non-last tools when placing a 1h prefix", () => {
+    it("removes existing 5m markers from tools when placing a 1h prefix (marker lands on system)", () => {
       const requestWithExistingMarkers: AnthropicMessagesRequest = {
         ...baseRequest,
         tools: [
@@ -126,9 +150,11 @@ describe("mutateRequest", () => {
         include_middle_breakpoint: false,
       }, "1h");
 
-      // Only the last tool should have a marker, and it must be 1h
+      // H5: baseRequest has system blocks, so all tool markers are stripped and the
+      // single prefix marker lands on the last system block as 1h.
       expect(out.tools?.[0]?.cache_control).toBeUndefined();
-      expect(out.tools?.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+      expect(out.tools?.at(-1)?.cache_control).toBeUndefined();
+      expect(out.system?.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
     });
 
     it("removes existing markers from system blocks when placing prefix on last system", () => {
@@ -213,14 +239,14 @@ describe("mutateRequest", () => {
 
       const userMsg = out.messages[2];
       expect(Array.isArray(userMsg?.content)).toBe(true);
-      const results = userMsg!.content as any[];
-      expect(results[0].tool_use_id).toBe("toolu_A");
-      expect(results[1].tool_use_id).toBe("toolu_B");
-      expect(results[2].tool_use_id).toBe("toolu_C");
+      const results = userMsg!.content as ContentView[];
+      expect(results[0]!.tool_use_id).toBe("toolu_A");
+      expect(results[1]!.tool_use_id).toBe("toolu_B");
+      expect(results[2]!.tool_use_id).toBe("toolu_C");
       // Content must follow the IDs
-      expect(results[0].content).toBe("content A");
-      expect(results[1].content).toBe("content B");
-      expect(results[2].content).toBe("content C");
+      expect(results[0]!.content).toBe("content A");
+      expect(results[1]!.content).toBe("content B");
+      expect(results[2]!.content).toBe("content C");
     });
 
     it("leaves already-ordered tool_result blocks unchanged", () => {
@@ -253,9 +279,9 @@ describe("mutateRequest", () => {
         include_middle_breakpoint: false,
       });
 
-      const results = out.messages[2]!.content as any[];
-      expect(results[0].tool_use_id).toBe("toolu_X");
-      expect(results[1].tool_use_id).toBe("toolu_Y");
+      const results = out.messages[2]!.content as ContentView[];
+      expect(results[0]!.tool_use_id).toBe("toolu_X");
+      expect(results[1]!.tool_use_id).toBe("toolu_Y");
     });
 
     it("preserves non-tool_result blocks (text) in position while reordering tool_results", () => {
@@ -290,15 +316,15 @@ describe("mutateRequest", () => {
         include_middle_breakpoint: false,
       });
 
-      const content = out.messages[2]!.content as any[];
+      const content = out.messages[2]!.content as ContentView[];
       // Text block stays in position 0
-      expect(content[0].type).toBe("text");
-      expect(content[0].text).toBe("interleaved text");
+      expect(content[0]!.type).toBe("text");
+      expect(content[0]!.text).toBe("interleaved text");
       // tool_results are now sorted: toolu_1 before toolu_2
-      expect(content[1].tool_use_id).toBe("toolu_1");
-      expect(content[1].content).toBe("one");
-      expect(content[2].tool_use_id).toBe("toolu_2");
-      expect(content[2].content).toBe("two");
+      expect(content[1]!.tool_use_id).toBe("toolu_1");
+      expect(content[1]!.content).toBe("one");
+      expect(content[2]!.tool_use_id).toBe("toolu_2");
+      expect(content[2]!.content).toBe("two");
     });
 
     it("handles multiple assistant→user tool pairs in the same conversation", () => {
@@ -350,14 +376,14 @@ describe("mutateRequest", () => {
       });
 
       // First pair: P before Q
-      const pair1 = out.messages[2]!.content as any[];
-      expect(pair1[0].tool_use_id).toBe("toolu_P");
-      expect(pair1[1].tool_use_id).toBe("toolu_Q");
+      const pair1 = out.messages[2]!.content as ContentView[];
+      expect(pair1[0]!.tool_use_id).toBe("toolu_P");
+      expect(pair1[1]!.tool_use_id).toBe("toolu_Q");
 
       // Second pair: R before S
-      const pair2 = out.messages[4]!.content as any[];
-      expect(pair2[0].tool_use_id).toBe("toolu_R");
-      expect(pair2[1].tool_use_id).toBe("toolu_S");
+      const pair2 = out.messages[4]!.content as ContentView[];
+      expect(pair2[0]!.tool_use_id).toBe("toolu_R");
+      expect(pair2[1]!.tool_use_id).toBe("toolu_S");
     });
 
     it("does not mutate the original request when reordering", () => {
