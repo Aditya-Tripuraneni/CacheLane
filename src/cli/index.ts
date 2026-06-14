@@ -4,8 +4,8 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { Command } from "commander";
-import { loadConfig, defaultWorkspaceId } from "../config/index.js";
-import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
+import { loadConfig } from "../config/index.js";
+import { openDatabase } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
 import { startProxy } from "../proxy/server.js";
 import {
@@ -147,121 +147,19 @@ function readPrunerDebugEntries(logPath: string, limit: number): unknown[] {
   return entries.slice(-limit);
 }
 
-interface TranscriptApiCall {
-  id: string;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cache_creation_5m_tokens: number;
-  cache_creation_1h_tokens: number;
-  cache_read_tokens: number;
-  created_at: number;
-}
-
-function parseTranscriptApiCalls(content: string): TranscriptApiCall[] {
-  const calls: TranscriptApiCall[] = [];
-  for (const line of content.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      const entry = JSON.parse(trimmed) as Record<string, unknown>;
-      const msg = entry.message as Record<string, unknown> | undefined;
-      if (!msg || msg.role !== "assistant" || !msg.id || !msg.usage) continue;
-
-      const u = msg.usage as Record<string, number | Record<string, number> | undefined>;
-      const num = (v: number | undefined) => (typeof v === "number" ? v : 0);
-
-      calls.push({
-        id: msg.id as string,
-        model: (msg.model as string) ?? "",
-        input_tokens: num(u.input_tokens as number | undefined),
-        output_tokens: num(u.output_tokens as number | undefined),
-        cache_creation_5m_tokens: num(
-          (u.ephemeral_5m_input_tokens ??
-            u.cache_creation_5m_tokens ??
-            u.cache_creation_input_tokens) as number | undefined,
-        ),
-        cache_creation_1h_tokens: num(
-          (u.ephemeral_1h_input_tokens ?? u.cache_creation_1h_tokens) as number | undefined,
-        ),
-        cache_read_tokens: num(
-          (u.cache_read_input_tokens ?? u.cache_read_tokens) as number | undefined,
-        ),
-        created_at: typeof entry.timestamp === "number" ? (entry.timestamp as number) : Date.now(),
-      });
-    } catch {
-      // Skip malformed lines
-    }
-  }
-  return calls;
-}
-
-async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, unknown>): Promise<void> {
-  try {
-    const transcriptPath =
-      typeof parsed.transcript_path === "string" ? parsed.transcript_path : null;
-    if (!transcriptPath) return;
-
-    let content: string;
-    try {
-      content = fs.readFileSync(transcriptPath, "utf-8");
-    } catch {
-      return;
-    }
-
-    const calls = parseTranscriptApiCalls(content);
-    if (calls.length === 0) return;
-
-    // In Hook mode (e.g. Bedrock), we bypass the HTTP proxy, so we must
-    // record turn statistics directly from the Claude Code transcript.
-    const db = openDatabase(cachelaneDbPath(env));
-    try {
-      const workspaceId = env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
-      const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : "default";
-
-      for (const call of calls) {
-        if (!db.getTurn(call.id)) {
-          const effective = calculateEffectiveCostUnits({
-            input_tokens: call.input_tokens,
-            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
-            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
-            cache_read_tokens: call.cache_read_tokens,
-          });
-
-          const currentTurn = db.allocateTurnNumber({
-            workspace_id: workspaceId,
-            session_id: sessionId,
-            updated_at: call.created_at,
-          });
-
-          db.insertTurn({
-            id: call.id,
-            workspace_id: workspaceId,
-            session_id: sessionId,
-            turn_number: currentTurn,
-            model: call.model,
-            input_tokens: call.input_tokens,
-            output_tokens: call.output_tokens,
-            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
-            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
-            cache_read_tokens: call.cache_read_tokens,
-            effective_cost_units: effective,
-            prefix_breakpoint_hash: null,
-            middle_breakpoint_hash: null,
-            pruned_blocks_count: 0,
-            keepalive_pings_since_last_turn: 0,
-            signals: JSON.stringify(["mode:hook"]),
-            request_mutated: 1, // Indicate it was processed in hook mode
-            created_at: call.created_at,
-          });
-        }
-      }
-    } finally {
-      db.close();
-    }
-  } catch (err) {
-    process.stderr.write(`[cachelane] hook error: ${err instanceof Error ? err.message : String(err)}\n`);
-  }
+// The Stop/UserPromptSubmit hook is now a no-op for turn accounting. The
+// CacheLane proxy is the single source of truth for turn statistics: it sees
+// the real (pruned, breakpoint-marked) request body and records accurate
+// pruned_blocks_count + signals per turn. The hook only ever saw the Claude
+// Code transcript *after the fact* — it could not observe pruning, so it wrote
+// duplicate `turns` rows with pruned_blocks_count=0 and signal "mode:hook".
+// Because both writers call allocateTurnNumber(), those zeroed hook rows did
+// not collide with the proxy rows; they accumulated alongside them and buried
+// the proxy's real numbers, making the dashboard report "Pruned blocks: 0"
+// even while the proxy pruned on nearly every turn. Recording nothing here
+// leaves the proxy's rows as the only turn stats.
+function handleHookEvent(): void {
+  // Intentionally empty — see comment above.
 }
 
 export function createCachelaneCli(options: CliOptions = {}): Command {
@@ -491,9 +389,12 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const input = await readStdin();
       if (input.trim().length === 0) return;
       try {
-        const parsed = JSON.parse(input) as Record<string, unknown>;
+        // Parse to validate the payload is well-formed JSON (fail-open on
+        // garbage), but turn accounting is owned by the proxy now — the hook
+        // performs no recording.
+        JSON.parse(input);
         if (name === "user-prompt-submit" || name === "stop") {
-          await handleHookEvent(env, parsed);
+          handleHookEvent();
         }
       } catch {
         // Fail open — don't crash Claude Code
