@@ -602,6 +602,68 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       runDashboard(cmd);
     });
 
+  benchmarkCmd
+    .command("duel")
+    .description("Run CacheLane ON vs OFF on the same scenarios and emit one comparison report")
+    .option("--run-id <id>", "Run identifier (default: timestamp)")
+    .option("--cooldown <seconds>", "Cooldown between ON/OFF runs", (v) => parseInt(v, 10), 360)
+    .option("--model <model>", "Model id for the estimate tier", "claude-sonnet-4-6")
+    .option("--scenario-dir <dir>", "Scenario directory")
+    .option("--estimate-only", "Skip live Claude Code runs (free, CI-safe)", false)
+    .action(async (cmd: {
+      runId?: string; cooldown: number; model: string; scenarioDir?: string; estimateOnly: boolean;
+    }) => {
+      const { mkdirSync, writeFileSync } = await import("node:fs");
+      const { resolve } = await import("node:path");
+      const { loadScenarioSpecs } = await import("../agent-traces/scenarios.js");
+      const { createClaudeCodeAdapter } = await import("../agent-traces/providers/claude-code.js");
+      const { normalizeTrace } = await import("../agent-traces/normalizer.js");
+      const { extractBilledUsage } = await import("../benchmark/usage-extract.js");
+      const { runDuel, renderDuelMarkdown } = await import("../benchmark/index.js");
+      const { setMutationEnabled } = await import("./config.js");
+
+      const runId = cmd.runId ?? new Date().toISOString().replace(/[:.]/g, "-");
+      const configPath = cachelaneConfigPath(env);
+      const scenarios = loadScenarioSpecs(cmd.scenarioDir);
+      const adapter = createClaudeCodeAdapter();
+      const runDir = resolve(process.cwd(), "benchmark", "runs", runId);
+      mkdirSync(runDir, { recursive: true });
+
+      const report = await runDuel(
+        { run_id: runId, cooldown_seconds: cmd.cooldown, model: cmd.model, estimate_only: cmd.estimateOnly },
+        scenarios,
+        {
+          setMutationEnabled: (enabled: boolean) => { setMutationEnabled(configPath, enabled); },
+          sleep: (ms: number) => new Promise((r) => setTimeout(r, ms)),
+          now: () => new Date(),
+          runScenarioSession: async (scenarioId: string) => {
+            const scenario = scenarios.find((s) => s.id === scenarioId)!;
+            const raw = await adapter.runScenario(scenario, {
+              dry_run: cmd.estimateOnly,
+              run_id: runId,
+              run_dir: runDir,
+              now: () => new Date(),
+            });
+            const normalized = normalizeTrace(raw);
+            const billed = raw.transcript_path
+              ? extractBilledUsage(raw.transcript_path)
+              : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
+            return { normalized, transcriptPath: raw.transcript_path, billed };
+          },
+        },
+      );
+
+      // Always restore mutation to ON after the duel (fail-open default).
+      setMutationEnabled(configPath, true);
+
+      const jsonPath = resolve(runDir, "duel-report.json");
+      const mdPath = resolve(runDir, "DUEL-REPORT.md");
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+      writeFileSync(mdPath, renderDuelMarkdown(report), "utf8");
+
+      io.stdout(`${JSON.stringify({ run_id: runId, json_path: jsonPath, markdown_path: mdPath, totals: report.totals }, null, 2)}\n`);
+    });
+
   return program;
 }
 

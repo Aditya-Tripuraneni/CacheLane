@@ -11,4 +11,6 @@ export type {
 export { runLiveReport } from "./live-report.js";
 export { runLiveAbTest } from "./live-ab-test.js";
 export { runDashboard } from "./dashboard.js";
+export { runDuel, type DuelDeps, type RunDuelOptions } from "./duel.js";
+export { buildDuelReport, renderDuelMarkdown, type DuelReport } from "./duel-report.js";
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createClaudeCodeAdapter } from "../providers/claude-code.js";
 import { createGlmAdapter, buildGlmChatRequest, summarizeGlmRequest } from "../providers/glm.js";
 import { validateScenarioSpec } from "../scenarios.js";
 
@@ -45,5 +46,32 @@ describe("GLM provider", () => {
 
     expect(JSON.stringify(raw)).not.toContain("secret-token");
     expect(raw.request_summary?.model).toBe("glm-test");
+  });
+});
+
+describe("claude-code adapter multi-turn dry run", () => {
+  it("plans one command per turn under a single pinned session id", async () => {
+    const adapter = createClaudeCodeAdapter();
+    const scenario = {
+      id: "demo",
+      title: "Demo",
+      description: "d",
+      prompt: "first",
+      turns: ["first", "second", "third"],
+      workspace_files: [],
+      expected_references: [],
+      tags: [],
+    };
+    const raw = await adapter.runScenario(scenario, {
+      dry_run: true,
+      run_id: "run-1",
+      run_dir: "/tmp/run-1",
+      now: () => new Date("2026-06-14T00:00:00.000Z"),
+    });
+    expect(raw.turns).toHaveLength(3);
+    const summary = raw.command_summary as { session_id?: string; turn_count?: number };
+    expect(summary.turn_count).toBe(3);
+    expect(typeof summary.session_id).toBe("string");
+    expect(summary.session_id).toContain("run-1");
   });
 });

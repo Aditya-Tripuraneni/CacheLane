@@ -1,0 +1,19 @@
+{
+  "id": "multi-turn-refactor",
+  "title": "Multi-turn refactor",
+  "description": "Read a file, find an edge case, write a test, then refactor across four turns in one session so cache reuse and pruning engage.",
+  "turns": [
+    "Read src/cache-policy.ts and summarize the TTL behavior in two sentences.",
+    "Find any edge case where the one hour prefix never refreshes.",
+    "Write a test that reproduces that edge case.",
+    "Refactor ttlForPrefix to fix the edge case while keeping the test green."
+  ],
+  "workspace_files": [
+    {
+      "path": "src/cache-policy.ts",
+      "content": "export function ttlForPrefix(kind: 'ephemeral_5m' | 'ephemeral_1h'): number { return kind === 'ephemeral_1h' ? 3600 : 300; } The keepalive worker should avoid refreshing one hour prefixes unless the policy explicitly enables it."
+    }
+  ],
+  "expected_references": ["src/cache-policy.ts"],
+  "tags": ["multi-turn", "refactor"]
+}
