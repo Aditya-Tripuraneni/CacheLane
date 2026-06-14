@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -47,7 +48,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
       const startedDate = runOptions.now();
       const startedAt = startedDate.toISOString();
       const turns = scenario.turns.length > 0 ? scenario.turns : [scenario.prompt];
-      const sessionId = `${runOptions.run_id}-${scenario.id}`;
+      const sessionId = randomUUID();
 
       if (runOptions.dry_run) {
         return {
