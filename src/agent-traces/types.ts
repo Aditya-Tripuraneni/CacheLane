@@ -23,6 +23,7 @@ export interface ScenarioSpec {
   title: string;
   description: string;
   prompt: string;
+  turns: string[];
   workspace_files: ScenarioWorkspaceFile[];
   expected_references: string[];
   tags: string[];

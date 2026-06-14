@@ -41,3 +41,32 @@ describe("agent trace scenarios", () => {
     expect(() => loadScenarioSpecs(dir)).toThrow("duplicate scenario id first");
   });
 });
+
+describe("validateScenarioSpec turns", () => {
+  const base = {
+    id: "multi-turn-demo",
+    title: "Demo",
+    description: "d",
+    workspace_files: [],
+  };
+
+  it("defaults turns from a single prompt", () => {
+    const spec = validateScenarioSpec({ ...base, prompt: "do the thing" });
+    expect(spec.turns).toEqual(["do the thing"]);
+    expect(spec.prompt).toBe("do the thing");
+  });
+
+  it("accepts an explicit turns array and sets prompt to turns[0]", () => {
+    const spec = validateScenarioSpec({ ...base, turns: ["first", "second"] });
+    expect(spec.turns).toEqual(["first", "second"]);
+    expect(spec.prompt).toBe("first");
+  });
+
+  it("rejects a scenario with neither prompt nor turns", () => {
+    expect(() => validateScenarioSpec({ ...base })).toThrow(/prompt or turns/);
+  });
+
+  it("rejects an empty turns array", () => {
+    expect(() => validateScenarioSpec({ ...base, turns: [] })).toThrow(/turns/);
+  });
+});
