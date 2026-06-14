@@ -3,12 +3,34 @@ import { DEFAULT_CONFIG } from "../../config/defaults.js";
 import { CacheStateTracker } from "../../orchestrator/index.js";
 import type { PrefixState } from "../../types/index.js";
 import {
+  computeTickIntervalMs,
   decideKeepalive,
   KeepaliveWorker,
   type KeepalivePingResult,
 } from "../index.js";
 
 const config = DEFAULT_CONFIG.keepalive;
+
+describe("computeTickIntervalMs", () => {
+  it("ticks fine enough to land inside the default 5m ping window", () => {
+    // Default window for a 5m prefix is idle in [240s, 300s) = 60s wide.
+    // Cadence must be <= that width so a tick can land inside it.
+    const tickMs = computeTickIntervalMs(config);
+    expect(tickMs).toBeLessThanOrEqual(60_000);
+    expect(tickMs).toBe(30_000);
+  });
+
+  it("never returns a cadence coarser than the near-expiry threshold", () => {
+    const tiny = { ...config, interval_seconds: 10, idle_threshold_seconds: 1 };
+    expect(computeTickIntervalMs(tiny)).toBeLessThanOrEqual(10 * 1000);
+  });
+
+  it("clamps to a sane floor when the window is empty (misconfig)", () => {
+    // idle_threshold >= TTL leaves no pingable window for a 5m prefix.
+    const bad = { ...config, idle_threshold_seconds: 600 };
+    expect(computeTickIntervalMs(bad)).toBe(5_000);
+  });
+});
 
 function state(overrides: Partial<PrefixState> = {}): PrefixState {
   return {
@@ -233,6 +255,30 @@ describe("KeepaliveWorker", () => {
       last_read_at_ms: 275_000,
       expected_expiry_ms: 3_875_000,
     });
+  });
+
+  it("fires at least one ping before a 5m prefix expires under the real timer cadence", async () => {
+    // Regression: with the timer firing every interval_seconds (150s), ticks
+    // landed at 150s (idle<240 -> skip) and 300s (expired -> skip), never inside
+    // the 60s ping window, so the cache silently expired unpinged.
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    try {
+      const tracker = new CacheStateTracker();
+      tracker.update("ws-1", "s-1", state());
+      const executor = vi.fn(async (): Promise<KeepalivePingResult> => ({ ok: true }));
+      const worker = new KeepaliveWorker({ tracker, config, executor });
+
+      worker.start();
+      await vi.advanceTimersByTimeAsync(310_000);
+      worker.stop();
+
+      expect(
+        tracker.get("ws-1", "s-1")?.keepalive_pings_since_last_turn ?? 0,
+      ).toBeGreaterThanOrEqual(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("logs unexpected interval tick failures", async () => {
