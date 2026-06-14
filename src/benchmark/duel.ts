@@ -62,12 +62,17 @@ export async function runDuel(
     const onFirst = i % 2 === 0;
     const order: boolean[] = onFirst ? [true, false] : [false, true];
 
+    console.error(`[duel] Running scenario ${i + 1}/${scenarios.length}: ${scenario.id}`);
     const results = new Map<boolean, ScenarioRunResult>();
     for (let j = 0; j < order.length; j++) {
       const mutationEnabled = order[j]!;
+      console.error(`[duel]   -> Phase ${j + 1}/2: CacheLane ${mutationEnabled ? "ON" : "OFF"}`);
       deps.setMutationEnabled(mutationEnabled);
       results.set(mutationEnabled, await deps.runScenarioSession(scenario.id, mutationEnabled));
-      if (cooldownMs > 0 && j < order.length - 1) await deps.sleep(cooldownMs);
+      if (cooldownMs > 0 && j < order.length - 1) {
+        console.error(`[duel]   -> Waiting ${options.cooldown_seconds}s for Anthropic cache to expire...`);
+        await deps.sleep(cooldownMs);
+      }
     }
 
     const onResult = results.get(true)!;
