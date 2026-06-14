@@ -1,6 +1,6 @@
 {
   "name": "cachelane",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Cache-aware prompt orchestration for Claude Code",
   "license": "Apache-2.0",
   "type": "module",
