@@ -65,7 +65,7 @@ function contextFromOptions(
   return {
     context: {
       db,
-      workspace_id: options.workspaceId ?? env.CACHELANE_WORKSPACE_ID ?? "default",
+      workspace_id: options.workspaceId ?? env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId(),
       session_id: options.sessionId ?? env.CACHELANE_SESSION_ID ?? "default",
     },
     close: () => db.close(),
