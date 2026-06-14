@@ -49,11 +49,26 @@ export function validateScenarioSpec(input: unknown, source = "scenario"): Scena
     throw new Error(`${source}: id must be stable kebab-case`);
   }
 
+  const hasPrompt = input.prompt !== undefined;
+  const hasTurns = Array.isArray(input.turns);
+  if (!hasPrompt && !hasTurns) {
+    throw new Error(`${source}: scenario must define prompt or turns`);
+  }
+
+  const turns = hasTurns
+    ? readStringArray(input.turns, "turns", source)
+    : [readString(input.prompt, "prompt", source)];
+  const firstTurn = turns[0];
+  if (firstTurn === undefined) {
+    throw new Error(`${source}: turns must contain at least one prompt`);
+  }
+
   return {
     id,
     title: readString(input.title, "title", source),
     description: readString(input.description, "description", source),
-    prompt: readString(input.prompt, "prompt", source),
+    prompt: firstTurn,
+    turns,
     workspace_files: readWorkspaceFiles(input.workspace_files, source),
     expected_references: input.expected_references
       ? readStringArray(input.expected_references, "expected_references", source)

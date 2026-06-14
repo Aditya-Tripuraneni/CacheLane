@@ -71,6 +71,12 @@ export function setPrunerEnabled(configPath: string, enabled: boolean): Cachelan
   });
 }
 
+export function setMutationEnabled(configPath: string, enabled: boolean): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    ensureSection(raw, "features").mutation_enabled = enabled;
+  });
+}
+
 export function setPrunerMode(
   configPath: string,
   mode: CachelaneConfig["pruner"]["mode"],

@@ -46,32 +46,41 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
     async runScenario(scenario, runOptions): Promise<RawTraceSession> {
       const startedDate = runOptions.now();
       const startedAt = startedDate.toISOString();
+      const turns = scenario.turns.length > 0 ? scenario.turns : [scenario.prompt];
+      const sessionId = `${runOptions.run_id}-${scenario.id}`;
 
       if (runOptions.dry_run) {
         return {
-          session_id: `${runOptions.run_id}-${scenario.id}`,
+          session_id: sessionId,
           provider: "claude-code",
           scenario_id: scenario.id,
           started_at: startedAt,
           ended_at: runOptions.now().toISOString(),
           command_summary: {
             command,
-            args: [...baseArgs, "<scenario-prompt>"],
+            args: [...baseArgs, "<scenario-turn>"],
             transcript_root: transcriptRoot,
+            session_id: sessionId,
+            turn_count: turns.length,
           },
-          turns: [
-            {
-              assistant_text: `Dry run only. Planned Claude Code command for ${scenario.id}.`,
-            },
-          ],
+          turns: turns.map((_, i) => ({
+            assistant_text: `Dry run only. Planned Claude Code turn ${i + 1}/${turns.length} for ${scenario.id}.`,
+          })),
         };
       }
 
-      await execFileAsync(command, [...baseArgs, scenario.prompt], {
-        cwd: process.cwd(),
-        timeout: 120_000,
-        maxBuffer: 1024 * 1024 * 10,
-      });
+      for (let i = 0; i < turns.length; i++) {
+        const turnPrompt = turns[i]!;
+        const turnArgs =
+          i === 0
+            ? ["--session-id", sessionId, ...baseArgs, turnPrompt]
+            : ["--resume", sessionId, ...baseArgs, turnPrompt];
+        await execFileAsync(command, turnArgs, {
+          cwd: process.cwd(),
+          timeout: 120_000,
+          maxBuffer: 1024 * 1024 * 10,
+        });
+      }
 
       const transcriptPath = newestTranscriptAfter(transcriptRoot, startedDate.getTime());
       if (!transcriptPath) {
@@ -79,7 +88,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
       }
 
       return {
-        session_id: `${runOptions.run_id}-${scenario.id}`,
+        session_id: sessionId,
         provider: "claude-code",
         scenario_id: scenario.id,
         started_at: startedAt,
@@ -87,8 +96,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
         transcript_path: transcriptPath,
         command_summary: {
           command,
-          args: [...baseArgs, "<scenario-prompt>"],
+          args: [...baseArgs, "<scenario-turn>"],
           transcript_root: transcriptRoot,
+          session_id: sessionId,
+          turn_count: turns.length,
         },
         turns: [],
       };
