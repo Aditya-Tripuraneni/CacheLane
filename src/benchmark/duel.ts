@@ -69,7 +69,10 @@ export async function runDuel(
       console.error(`[duel]   -> Phase ${j + 1}/2: CacheLane ${mutationEnabled ? "ON" : "OFF"}`);
       deps.setMutationEnabled(mutationEnabled);
       results.set(mutationEnabled, await deps.runScenarioSession(scenario.id, mutationEnabled));
-      if (cooldownMs > 0 && j < order.length - 1) {
+      // The cooldown only exists to let the live Anthropic prompt cache expire
+      // between ON/OFF runs. In estimate-only mode there are no live API calls,
+      // so waiting is pure dead time — skip it.
+      if (!options.estimate_only && cooldownMs > 0 && j < order.length - 1) {
         console.error(`[duel]   -> Waiting ${options.cooldown_seconds}s for Anthropic cache to expire...`);
         await deps.sleep(cooldownMs);
       }

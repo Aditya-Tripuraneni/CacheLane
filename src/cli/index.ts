@@ -617,6 +617,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const { resolve } = await import("node:path");
       const { loadScenarioSpecs } = await import("../agent-traces/scenarios.js");
       const { createClaudeCodeAdapter } = await import("../agent-traces/providers/claude-code.js");
+      const { createFakeAdapter } = await import("../agent-traces/providers/fake.js");
       const { normalizeTrace } = await import("../agent-traces/normalizer.js");
       const { extractBilledUsage } = await import("../benchmark/usage-extract.js");
       const { runDuel, renderDuelMarkdown } = await import("../benchmark/index.js");
@@ -625,7 +626,12 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const runId = cmd.runId ?? new Date().toISOString().replace(/[:.]/g, "-");
       const configPath = cachelaneConfigPath(env);
       const scenarios = loadScenarioSpecs(cmd.scenarioDir);
-      const adapter = createClaudeCodeAdapter();
+      // Estimate-only is the free, CI-safe path and must NOT shell out to Claude
+      // Code. The fake adapter synthesizes a deterministic trace with real prompt
+      // blocks from each scenario spec, which is what the deterministic estimate
+      // is computed from. The claude-code dry-run only emits placeholder text
+      // with no blocks, which yields an all-zero (broken-looking) report.
+      const adapter = cmd.estimateOnly ? createFakeAdapter() : createClaudeCodeAdapter();
       const runDir = resolve(process.cwd(), "benchmark", "runs", runId);
       mkdirSync(runDir, { recursive: true });
 
@@ -669,12 +675,10 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
                 : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
               return { normalized, transcriptPath: raw.transcript_path, billed };
             } finally {
-              const { execSync } = await import("node:child_process");
-              try {
-                execSync("git checkout .", { stdio: "ignore", cwd: process.cwd() });
-              } catch (e) {
-                // Ignore git checkout errors if not in a git repo
-              }
+              // Restore only the files this scenario touched. Do NOT run
+              // `git checkout .` here — it discards ALL uncommitted changes in
+              // the user's working tree, not just scenario files (a data-loss
+              // bug). The explicit save/restore below is surgical and safe.
               for (const fullPath of createdPaths) {
                 if (existsSync(fullPath)) unlinkSync(fullPath);
               }
