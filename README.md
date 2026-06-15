@@ -44,7 +44,7 @@ Run `cachelane stats` **from your project directory**. It scopes to that project
 
 ## Why it saves money (the intuition)
 
-> **In one breath:** the Claude API is stateless, so Claude Code re-sends your whole conversation on every turn and you pay for it again and again. CacheLane rearranges each request so the unchanging part stays identical and rides Anthropic's prompt cache at **one-tenth** the price, then trims stale clutter. The longer the session, the more you save.
+> **In one breath:** the Claude API is stateless, so Claude Code re-sends your whole conversation on every turn and you pay for it again and again. CacheLane marks the unchanging part with cache breakpoints so it stays identical and rides Anthropic's prompt cache at **one-tenth** the price, then trims stale tool output. The longer the session, the more you save.
 
 ### 1. The problem: the API is stateless
 
@@ -81,24 +81,26 @@ The catch is in **how** the cache matches. Anthropic caches the **prefix** of a 
 New turns append to the **end** of the conversation, so the front is naturally stable. The thing that actually breaks caching is **volatile content sitting ahead of stable content**: a freshly injected tool result, a changing system reminder, or a block whose order or formatting shifts between turns. If any of that lands before your expensive stable content (system prompt, tool schemas, large files), the prefix diverges early and the stable content after it can no longer be served from cache.
 
 > **Source:** Anthropic, [Prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching): *"Cache writes happen only at your breakpoint. Marking a block with `cache_control` writes exactly one cache entry: a hash of the prefix ending at that block."* The system *"automatically find[s] the longest prefix that a prior request already wrote to the cache."*
+>
+> **What about Anthropic's _automatic caching_?** Anthropic can place one breakpoint for you — on the *last cacheable block*, advanced as the conversation grows, with a 20-block lookback ([Prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)). But it still only *places a breakpoint*: it never reorders your prompt and never prunes idle content. CacheLane's breakpoint placement is on par with using native caching well — its **additional** savings come from K-pruning and keepalive (below), which the API has no equivalent for.
 
-### 3. The trick: put the unchanging stuff first
+### 3. The trick: mark the cache boundaries (without moving anything)
 
-CacheLane sorts every request into three **volatility regions** and places two `cache_control` breakpoints at the boundaries:
+CacheLane classifies each request into three **volatility regions** and places two `cache_control` breakpoints at the boundaries. It does **not** reorder your conversation: the API already sends `system` and `tools` before `messages`, and new turns append to the end, so the stable material is naturally at the front. CacheLane only marks *where* the cache boundaries sit (and strips/replaces any breakpoints Claude Code already set):
 
 ```
 +----------------------------------------+
-| STABLE    system prompt, tools, files  |  identical every turn
-|           you've read, pinned rules    |  -> billed at 0.1x
+| STABLE    system prompt, tool schemas, |  identical every turn
+|           CLAUDE.md, pinned rules      |  -> billed at 0.1x
 | ============ cache breakpoint ======== |
-| SEMI      recent conversation history  |
+| SEMI      recent turns + files read    |
 | ============ cache breakpoint ======== |
 | VOLATILE  your newest message + latest |  the only genuinely new part
 |           tool output                  |  -> full price, but small
 +----------------------------------------+
 ```
 
-The expensive stable block forms a clean identical prefix, so Anthropic serves it from cache cheaply. The volatile material is pushed to the back where its constant churn can no longer invalidate anything above it. Only the small new piece at the bottom pays full price.
+The expensive stable block sits at the front of every request by API structure and stays byte-identical, so the breakpoint lets Anthropic serve it from cache cheaply. The volatile material is already at the back — where its churn can't invalidate anything above it — so CacheLane never has to move it. Only the small new piece at the bottom pays full price.
 
 ### 4. Worked example: "read a file"
 
@@ -171,7 +173,7 @@ This is **lossless, and nothing is ever stored.** CacheLane does not keep your c
 
 ### 7. Why there's a database
 
-Reordering one request needs no memory, but pruning and restoring are stateful across turns. So CacheLane keeps a local SQLite database (`~/.cachelane/cachelane.db`) holding **only metadata**:
+Placing breakpoints on one request needs no memory, but pruning and restoring are stateful across turns. So CacheLane keeps a local SQLite database (`~/.cachelane/cachelane.db`) holding **only metadata**:
 
 - **Idle counters:** "this block has been untouched for 3 turns" is impossible to know without history.
 - **Stub state and refetch handles:** which blocks are currently masked, and how `cachelane_expand` puts them back.
@@ -183,7 +185,7 @@ It never stores your prompts, code, or secrets, only hashes, counts, and short s
 
 ### 8. Keeping the cache warm (keepalive)
 
-Anthropic's cache only lives about 5 minutes (1 hour for large prefixes). If you step away mid-session, it would expire and your next turn would pay full price to re-seed it. So a keepalive worker sends a minimal synthetic ping (`max_tokens=1`) during idle gaps to keep the prefix hot, and it promotes large prefixes to the 1-hour tier automatically.
+Anthropic's cache lives about 5 minutes by default; a 1-hour tier is available at 2× write cost ([Prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)). If you step away mid-session, the cache would expire and your next turn would pay full price to re-seed it. So a keepalive worker sends a minimal synthetic ping (`max_tokens=1`) during idle gaps to keep the prefix hot, and CacheLane promotes large prefixes (≥ 50k tokens) to that 1-hour tier automatically.
 
 ---
 
@@ -204,7 +206,7 @@ So a single auto-launched process owns everything. That's why you never start an
 For each turn the proxy:
 
 1. Intercepts the outgoing request from Claude Code.
-2. Runs the pipeline (**classify, prune, reorder**) and inserts `cache_control` breakpoints.
+2. Runs the pipeline (**classify → prune → place `cache_control` breakpoints**).
 3. Forwards the optimized request to `api.anthropic.com` and streams the response straight back.
 4. Logs metadata (hashes, token counts, hit ratios) to local SQLite.
 
@@ -242,7 +244,7 @@ Sessions are keyed by Claude Code's own session id, so the value in the `cachela
 | `cachelane doctor [--json]` | Health check: Node version, config, SQLite writability, MCP + hook registration. |
 | `cachelane stats [--scope session\|workspace\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
 | `cachelane sessions [--json]` | List all recorded sessions with hit ratio and savings. |
-| `cachelane explain [--turn <N>] [--json]` | Show how CacheLane classified, reordered, and pruned blocks for a turn. |
+| `cachelane explain [--turn <N>] [--json]` | Show how CacheLane classified and pruned blocks, and where it placed cache breakpoints, for a turn. |
 | `cachelane config` | Print the active configuration. |
 
 ### Tuning
@@ -285,7 +287,7 @@ Settings live in `~/.cachelane/config.json` and can be edited via the tuning com
 | Setting | Default |
 |---------|---------|
 | Pruner | enabled, `K=3` |
-| Keepalive | `auto` (ping ~2.5 min idle; 1-hour TTL tier above ~50k-token prefixes) |
+| Keepalive | `auto` (ping every ~2.5 min after ~4 min idle; 1-hour TTL tier above 50k-token prefixes) |
 | Proxy | `127.0.0.1:7332`, upstream `api.anthropic.com:443` |
 | Auto-proxy | on (MCP server starts the proxy in-process) |
 | Telemetry | **off** (opt-in only) |
