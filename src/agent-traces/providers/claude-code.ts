@@ -48,7 +48,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
       const startedDate = runOptions.now();
       const startedAt = startedDate.toISOString();
       const turns = scenario.turns.length > 0 ? scenario.turns : [scenario.prompt];
-      const sessionId = randomUUID();
+      const sessionId = runOptions.run_id ?? randomUUID();
 
       if (runOptions.dry_run) {
         return {
