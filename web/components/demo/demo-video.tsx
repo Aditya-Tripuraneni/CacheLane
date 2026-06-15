@@ -39,7 +39,7 @@ export function DemoVideo() {
     >
       <video
         ref={ref}
-        src="/cachelane.mp4"
+        src="/cachelane.mp4?v=2"
         muted
         playsInline
         loop
