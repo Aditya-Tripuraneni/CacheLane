@@ -638,17 +638,34 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
           now: () => new Date(),
           runScenarioSession: async (scenarioId: string) => {
             const scenario = scenarios.find((s) => s.id === scenarioId)!;
-            const raw = await adapter.runScenario(scenario, {
-              dry_run: cmd.estimateOnly,
-              run_id: runId,
-              run_dir: runDir,
-              now: () => new Date(),
-            });
-            const normalized = normalizeTrace(raw);
-            const billed = raw.transcript_path
-              ? extractBilledUsage(raw.transcript_path)
-              : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
-            return { normalized, transcriptPath: raw.transcript_path, billed };
+            const { dirname, resolve: pathResolve } = await import("node:path");
+            const { mkdirSync, writeFileSync, unlinkSync, existsSync } = await import("node:fs");
+
+            const createdPaths: string[] = [];
+            for (const file of scenario.workspace_files) {
+              const fullPath = pathResolve(process.cwd(), file.path);
+              mkdirSync(dirname(fullPath), { recursive: true });
+              writeFileSync(fullPath, file.content, "utf8");
+              createdPaths.push(fullPath);
+            }
+
+            try {
+              const raw = await adapter.runScenario(scenario, {
+                dry_run: cmd.estimateOnly,
+                run_id: runId,
+                run_dir: runDir,
+                now: () => new Date(),
+              });
+              const normalized = normalizeTrace(raw);
+              const billed = raw.transcript_path
+                ? extractBilledUsage(raw.transcript_path)
+                : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
+              return { normalized, transcriptPath: raw.transcript_path, billed };
+            } finally {
+              for (const fullPath of createdPaths) {
+                if (existsSync(fullPath)) unlinkSync(fullPath);
+              }
+            }
           },
         },
       );
