@@ -642,11 +642,18 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
             const { mkdirSync, writeFileSync, unlinkSync, existsSync } = await import("node:fs");
 
             const createdPaths: string[] = [];
+            const originalContents = new Map<string, string>();
+            
             for (const file of scenario.workspace_files) {
               const fullPath = pathResolve(process.cwd(), file.path);
+              if (existsSync(fullPath)) {
+                const { readFileSync } = await import("node:fs");
+                originalContents.set(fullPath, readFileSync(fullPath, "utf8"));
+              } else {
+                createdPaths.push(fullPath);
+              }
               mkdirSync(dirname(fullPath), { recursive: true });
               writeFileSync(fullPath, file.content, "utf8");
-              createdPaths.push(fullPath);
             }
 
             try {
@@ -662,8 +669,17 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
                 : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
               return { normalized, transcriptPath: raw.transcript_path, billed };
             } finally {
+              const { execSync } = await import("node:child_process");
+              try {
+                execSync("git checkout .", { stdio: "ignore", cwd: process.cwd() });
+              } catch (e) {
+                // Ignore git checkout errors if not in a git repo
+              }
               for (const fullPath of createdPaths) {
                 if (existsSync(fullPath)) unlinkSync(fullPath);
+              }
+              for (const [fullPath, content] of originalContents.entries()) {
+                writeFileSync(fullPath, content, "utf8");
               }
             }
           },

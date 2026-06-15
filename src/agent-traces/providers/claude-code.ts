@@ -38,7 +38,7 @@ function newestTranscriptAfter(root: string, afterMs: number): string | undefine
 
 export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}): ProviderAdapter {
   const command = options.command ?? process.env.CLAUDE_CODE_COMMAND ?? "claude";
-  const baseArgs = options.args ?? ["-p"];
+  const baseArgs = options.args ?? ["-p", "--permission-mode", "acceptEdits"];
   const transcriptRoot =
     options.transcriptRoot ?? process.env.CLAUDE_CODE_TRANSCRIPTS ?? join(homedir(), ".claude", "projects");
 
