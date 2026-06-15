@@ -292,6 +292,36 @@ Settings live in `~/.cachelane/config.json` and can be edited via the tuning com
 
 ---
 
+## Chaining with another proxy (e.g. a token optimizer)
+
+CacheLane is compatible with another local proxy in front of `api.anthropic.com` — you **chain** them rather than choosing one. CacheLane's upstream is configurable (it is *not* hardcoded to Anthropic): set `proxy.upstream_host` / `upstream_port` / `upstream_ssl` / `upstream_path_prefix` in `~/.cachelane/config.json`. Run `cachelane config` to print the active values.
+
+**Put CacheLane *last*, immediately before Anthropic.** Its entire benefit comes from arranging blocks and placing `cache_control` breakpoints so the Anthropic prompt cache fires at 0.1×. That depends on the *exact bytes Anthropic receives* being the ones CacheLane arranged — so CacheLane should be the hop that talks to Anthropic. Any proxy that rewrites the body *after* CacheLane can shift or invalidate those breakpoints and defeat the cache.
+
+```
+Claude Code  ──►  Other proxy (:8787)  ──►  CacheLane (:7332)  ──►  api.anthropic.com
+```
+
+- Keep `ANTHROPIC_BASE_URL=http://localhost:8787` pointed at the other proxy.
+- Point the **other proxy's** upstream at CacheLane (`http://localhost:7332`) instead of directly at Anthropic.
+- Leave CacheLane's upstream at the default (`api.anthropic.com`).
+
+**If the other proxy can't be repointed** (only Claude Code's base URL is configurable), chain it the other way and set CacheLane's upstream to that proxy:
+
+```
+Claude Code  ──►  CacheLane (:7332)  ──►  Other proxy (:8787)  ──►  api.anthropic.com
+```
+
+- Set `ANTHROPIC_BASE_URL=http://localhost:7332`.
+- In `~/.cachelane/config.json`, set `proxy.upstream_host: "127.0.0.1"`, `proxy.upstream_port: 8787`, `proxy.upstream_ssl: false` (a local proxy is typically plain HTTP).
+- Caveat: the other proxy is now the last hop and may mutate the body, which can disturb CacheLane's `cache_control` placement and reduce the realized cache savings.
+
+**Caveats when stacking two token-reduction layers:** they may overlap or interact (e.g. one stripping content the other expects to stub/refetch). Verify with `cachelane stats` that you're still seeing cache reads and reduction after chaining.
+
+> Running a chain like this means *not* using the zero-config auto-proxy — you start `cachelane proxy` yourself and manage the `ANTHROPIC_BASE_URL` wiring manually.
+
+---
+
 ## Files & data storage
 
 All state is local:
