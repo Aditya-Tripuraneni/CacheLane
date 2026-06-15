@@ -672,7 +672,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
               const { execSync } = await import("node:child_process");
               try {
                 execSync("git checkout .", { stdio: "ignore", cwd: process.cwd() });
-              } catch (e) {
+              } catch {
                 // Ignore git checkout errors if not in a git repo
               }
               for (const fullPath of createdPaths) {
