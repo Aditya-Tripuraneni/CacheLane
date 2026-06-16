@@ -4,9 +4,73 @@ import os from "node:os";
 import path from "node:path";
 import { createCachelaneCli } from "../index.js";
 import { openDatabase } from "../../storage/index.js";
+import { defaultWorkspaceId } from "../../config/index.js";
 
 let tmpDir: string;
 let env: NodeJS.ProcessEnv;
+
+type CliDb = ReturnType<typeof openDatabase>;
+
+interface SeedTurnOpts {
+  id: string;
+  workspace_id: string;
+  session_id: string;
+  turn_number?: number;
+  pruned_blocks_count?: number;
+  created_at?: number;
+}
+
+function seedTurn(db: CliDb, opts: SeedTurnOpts): void {
+  db.insertTurn({
+    id: opts.id,
+    workspace_id: opts.workspace_id,
+    session_id: opts.session_id,
+    turn_number: opts.turn_number ?? 1,
+    model: "claude-opus-4-7",
+    input_tokens: 100,
+    output_tokens: 20,
+    cache_creation_5m_tokens: 0,
+    cache_creation_1h_tokens: 0,
+    cache_read_tokens: 900,
+    effective_cost_units: 190,
+    prefix_breakpoint_hash: null,
+    middle_breakpoint_hash: null,
+    pruned_blocks_count: opts.pruned_blocks_count ?? 0,
+    keepalive_pings_since_last_turn: 0,
+    created_at: opts.created_at ?? 1_715_000_000_000,
+  });
+}
+
+interface SeedExplanationOpts {
+  workspace_id: string;
+  session_id: string;
+  turn_number?: number;
+}
+
+function seedExplanation(db: CliDb, opts: SeedExplanationOpts): void {
+  db.insertTurnExplanation({
+    turn_id: `exp-${opts.workspace_id}-${opts.session_id}-${opts.turn_number ?? 1}`,
+    workspace_id: opts.workspace_id,
+    session_id: opts.session_id,
+    turn_number: opts.turn_number ?? 1,
+    model: "claude-opus-4-7",
+    prefix_breakpoint_hash: null,
+    middle_breakpoint_hash: null,
+    mutated: true,
+    pruned_blocks_count: 0,
+    prune_decisions: [],
+    block_metadata: [],
+    region_metadata: {
+      message_count: 1,
+      stable_count: 0,
+      semi_count: 0,
+      volatile_count: 1,
+    },
+    signals: ["prefix_cached"],
+    created_at: 1_715_000_000_000,
+    updated_at: 1_715_000_000_000,
+  });
+}
 
 async function run(args: string[]): Promise<string> {
   let stdout = "";
@@ -221,7 +285,16 @@ describe("cachelane CLI", () => {
       "mcp",
       "hooks",
       "data",
+      "upstream",
+      "fallback_rate",
+      "cache_reads",
     ]);
+  });
+
+  it("verify --json reports ok true on a healthy pipeline", async () => {
+    const output = await run(["verify", "--json"]);
+    const report = JSON.parse(output);
+    expect(report.ok).toBe(true);
   });
 
   it("debug pruner returns recent pruner log entries as parseable JSON", async () => {
@@ -350,5 +423,155 @@ describe("cachelane CLI", () => {
     await run(["install"]);
     await run(["uninstall", "--purge"]);
     expect(fs.existsSync(env.CACHELANE_HOME!)).toBe(false);
+  });
+});
+
+describe("cachelane CLI workspace scoping", () => {
+  function dbAt(): CliDb {
+    return openDatabase(path.join(env.CACHELANE_HOME!, "cachelane.db"));
+  }
+
+  // S1: the regression. The recorder writes turns under the cwd-derived
+  // workspace id, but `stats` must resolve to that same workspace by default
+  // (not the literal "default") so `--scope session` finds the data with no flags.
+  it("stats --scope session finds turns under the cwd workspace with no flags", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, {
+      id: "t-s1",
+      workspace_id: defaultWorkspaceId(),
+      session_id: "sess-1",
+      pruned_blocks_count: 4,
+    });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      turns: 1,
+      pruner_counts: { pruned_blocks: 4 },
+    });
+  });
+
+  // S2 / W2: an explicit --workspace-id flag still works (and outranks env).
+  it("stats --scope session honors an explicit --workspace-id flag", async () => {
+    const ws = defaultWorkspaceId();
+    const db = dbAt();
+    seedTurn(db, { id: "t-s2", workspace_id: ws, session_id: "sess-1" });
+    db.close();
+
+    const output = await run([
+      "stats",
+      "--workspace-id",
+      ws,
+      "--session-id",
+      "sess-1",
+      "--scope",
+      "session",
+      "--json",
+    ]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 1 });
+  });
+
+  // S3: scoping must stay correct — turns in a *different* workspace are not counted.
+  it("stats --scope session does not match turns from a different workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, { id: "t-s3", workspace_id: "some-other-ws", session_id: "sess-1" });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 0 });
+  });
+
+  // S4: with no --session-id, resolveSessionId picks the most recent session in
+  // the resolved workspace. pruned_blocks=7 marks the newer session uniquely.
+  it("stats --scope session auto-resolves to the most recent session in the workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    delete env.CACHELANE_SESSION_ID;
+    const ws = defaultWorkspaceId();
+    const db = dbAt();
+    seedTurn(db, {
+      id: "t-old",
+      workspace_id: ws,
+      session_id: "older",
+      created_at: 1_000,
+      pruned_blocks_count: 3,
+    });
+    seedTurn(db, {
+      id: "t-new",
+      workspace_id: ws,
+      session_id: "newer",
+      created_at: 2_000,
+      pruned_blocks_count: 7,
+    });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      turns: 1,
+      pruner_counts: { pruned_blocks: 7 },
+    });
+  });
+
+  // W4: --workspace-id flag overrides a (non-matching) CACHELANE_WORKSPACE_ID env.
+  it("explicit --workspace-id overrides the CACHELANE_WORKSPACE_ID env var", async () => {
+    env.CACHELANE_WORKSPACE_ID = "ws-env-empty";
+    const db = dbAt();
+    seedTurn(db, { id: "t-w4", workspace_id: "ws-flag", session_id: "sess-1" });
+    db.close();
+
+    const output = await run([
+      "stats",
+      "--workspace-id",
+      "ws-flag",
+      "--session-id",
+      "sess-1",
+      "--scope",
+      "session",
+      "--json",
+    ]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 1 });
+  });
+
+  // E1: explain has the same default-workspace bug; it must find the explanation
+  // under the cwd workspace with no flags.
+  it("explain finds the explanation under the cwd workspace with no flags", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedExplanation(db, {
+      workspace_id: defaultWorkspaceId(),
+      session_id: "sess-1",
+      turn_number: 1,
+    });
+    db.close();
+
+    const output = await run(["explain", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      found: true,
+      explanation: { turn_number: 1 },
+    });
+  });
+
+  // E2: explain scoping guard — an explanation in another workspace is not returned.
+  it("explain returns found=false when the explanation is in a different workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedExplanation(db, { workspace_id: "some-other-ws", session_id: "sess-1", turn_number: 1 });
+    db.close();
+
+    const output = await run(["explain", "--json"]);
+    expect(JSON.parse(output)).toEqual({ found: false });
+  });
+
+  // R2: scope=all ignores workspace entirely and aggregates across workspaces.
+  it("stats --scope all aggregates turns across workspaces", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, { id: "t-all-1", workspace_id: defaultWorkspaceId(), session_id: "s" });
+    seedTurn(db, { id: "t-all-2", workspace_id: "other-ws", session_id: "s" });
+    db.close();
+
+    const output = await run(["stats", "--scope", "all", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 2 });
   });
 });

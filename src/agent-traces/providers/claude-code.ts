@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -37,7 +38,7 @@ function newestTranscriptAfter(root: string, afterMs: number): string | undefine
 
 export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}): ProviderAdapter {
   const command = options.command ?? process.env.CLAUDE_CODE_COMMAND ?? "claude";
-  const baseArgs = options.args ?? ["-p"];
+  const baseArgs = options.args ?? ["-p", "--permission-mode", "acceptEdits"];
   const transcriptRoot =
     options.transcriptRoot ?? process.env.CLAUDE_CODE_TRANSCRIPTS ?? join(homedir(), ".claude", "projects");
 
@@ -47,7 +48,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeAdapterOptions = {}):
       const startedDate = runOptions.now();
       const startedAt = startedDate.toISOString();
       const turns = scenario.turns.length > 0 ? scenario.turns : [scenario.prompt];
-      const sessionId = `${runOptions.run_id}-${scenario.id}`;
+      const sessionId = runOptions.run_id ?? randomUUID();
 
       if (runOptions.dry_run) {
         return {

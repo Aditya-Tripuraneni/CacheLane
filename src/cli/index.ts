@@ -4,8 +4,8 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 
 import { Command } from "commander";
-import { loadConfig } from "../config/index.js";
-import { openDatabase } from "../storage/index.js";
+import { loadConfig, defaultWorkspaceId } from "../config/index.js";
+import { openDatabase, calculateEffectiveCostUnits } from "../storage/index.js";
 import { startCachelaneStdioServer } from "../server/index.js";
 import { startProxy } from "../proxy/server.js";
 import {
@@ -16,7 +16,7 @@ import {
   setPrunerMode,
   setTelemetryOptIn,
 } from "./config.js";
-import { formatDoctor, runDoctor } from "./doctor.js";
+import { formatDoctor, runDoctorAsync } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
@@ -65,7 +65,7 @@ function contextFromOptions(
   return {
     context: {
       db,
-      workspace_id: options.workspaceId ?? env.CACHELANE_WORKSPACE_ID ?? "default",
+      workspace_id: options.workspaceId ?? env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId(),
       session_id: options.sessionId ?? env.CACHELANE_SESSION_ID ?? "default",
     },
     close: () => db.close(),
@@ -147,19 +147,121 @@ function readPrunerDebugEntries(logPath: string, limit: number): unknown[] {
   return entries.slice(-limit);
 }
 
-// The Stop/UserPromptSubmit hook is now a no-op for turn accounting. The
-// CacheLane proxy is the single source of truth for turn statistics: it sees
-// the real (pruned, breakpoint-marked) request body and records accurate
-// pruned_blocks_count + signals per turn. The hook only ever saw the Claude
-// Code transcript *after the fact* — it could not observe pruning, so it wrote
-// duplicate `turns` rows with pruned_blocks_count=0 and signal "mode:hook".
-// Because both writers call allocateTurnNumber(), those zeroed hook rows did
-// not collide with the proxy rows; they accumulated alongside them and buried
-// the proxy's real numbers, making the dashboard report "Pruned blocks: 0"
-// even while the proxy pruned on nearly every turn. Recording nothing here
-// leaves the proxy's rows as the only turn stats.
-function handleHookEvent(): void {
-  // Intentionally empty — see comment above.
+interface TranscriptApiCall {
+  id: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_5m_tokens: number;
+  cache_creation_1h_tokens: number;
+  cache_read_tokens: number;
+  created_at: number;
+}
+
+function parseTranscriptApiCalls(content: string): TranscriptApiCall[] {
+  const calls: TranscriptApiCall[] = [];
+  for (const line of content.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const entry = JSON.parse(trimmed) as Record<string, unknown>;
+      const msg = entry.message as Record<string, unknown> | undefined;
+      if (!msg || msg.role !== "assistant" || !msg.id || !msg.usage) continue;
+
+      const u = msg.usage as Record<string, number | Record<string, number> | undefined>;
+      const num = (v: number | undefined) => (typeof v === "number" ? v : 0);
+
+      calls.push({
+        id: msg.id as string,
+        model: (msg.model as string) ?? "",
+        input_tokens: num(u.input_tokens as number | undefined),
+        output_tokens: num(u.output_tokens as number | undefined),
+        cache_creation_5m_tokens: num(
+          (u.ephemeral_5m_input_tokens ??
+            u.cache_creation_5m_tokens ??
+            u.cache_creation_input_tokens) as number | undefined,
+        ),
+        cache_creation_1h_tokens: num(
+          (u.ephemeral_1h_input_tokens ?? u.cache_creation_1h_tokens) as number | undefined,
+        ),
+        cache_read_tokens: num(
+          (u.cache_read_input_tokens ?? u.cache_read_tokens) as number | undefined,
+        ),
+        created_at: typeof entry.timestamp === "number" ? (entry.timestamp as number) : Date.now(),
+      });
+    } catch {
+      // Skip malformed lines
+    }
+  }
+  return calls;
+}
+
+async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, unknown>): Promise<void> {
+  try {
+    const transcriptPath =
+      typeof parsed.transcript_path === "string" ? parsed.transcript_path : null;
+    if (!transcriptPath) return;
+
+    let content: string;
+    try {
+      content = fs.readFileSync(transcriptPath, "utf-8");
+    } catch {
+      return;
+    }
+
+    const calls = parseTranscriptApiCalls(content);
+    if (calls.length === 0) return;
+
+    // In Hook mode (e.g. Bedrock), we bypass the HTTP proxy, so we must
+    // record turn statistics directly from the Claude Code transcript.
+    const db = openDatabase(cachelaneDbPath(env));
+    try {
+      const workspaceId = env.CACHELANE_WORKSPACE_ID ?? defaultWorkspaceId();
+      const sessionId = typeof parsed.session_id === "string" ? parsed.session_id : "default";
+
+      for (const call of calls) {
+        if (!db.getTurn(call.id)) {
+          const effective = calculateEffectiveCostUnits({
+            input_tokens: call.input_tokens,
+            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+          });
+
+          const currentTurn = db.allocateTurnNumber({
+            workspace_id: workspaceId,
+            session_id: sessionId,
+            updated_at: call.created_at,
+          });
+
+          db.insertTurn({
+            id: call.id,
+            workspace_id: workspaceId,
+            session_id: sessionId,
+            turn_number: currentTurn,
+            model: call.model,
+            input_tokens: call.input_tokens,
+            output_tokens: call.output_tokens,
+            cache_creation_5m_tokens: call.cache_creation_5m_tokens,
+            cache_creation_1h_tokens: call.cache_creation_1h_tokens,
+            cache_read_tokens: call.cache_read_tokens,
+            effective_cost_units: effective,
+            prefix_breakpoint_hash: null,
+            middle_breakpoint_hash: null,
+            pruned_blocks_count: 0,
+            keepalive_pings_since_last_turn: 0,
+            signals: JSON.stringify(["mode:hook"]),
+            request_mutated: 1, // Indicate it was processed in hook mode
+            created_at: call.created_at,
+          });
+        }
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    process.stderr.write(`[cachelane] hook error: ${err instanceof Error ? err.message : String(err)}\n`);
+  }
 }
 
 export function createCachelaneCli(options: CliOptions = {}): Command {
@@ -342,9 +444,21 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .command("doctor")
     .description("Check local CacheLane installation health")
     .option("--json", "Print stable JSON")
-    .action((cmd: JsonCommandOptions) => {
-      const report = runDoctor(env);
+    .option("--probe", "Probe a chained upstream's reachability (outbound connection)")
+    .action(async (cmd: JsonCommandOptions & { probe?: boolean }) => {
+      const report = await runDoctorAsync(env, { probe: Boolean(cmd.probe) });
       io.stdout(cmd.json ? jsonLine(report) : `${formatDoctor(report)}\n`);
+    });
+
+  program
+    .command("verify")
+    .description("Self-test that the CacheLane pipeline mutates, stubs, and rehydrates losslessly")
+    .option("--json", "Print stable JSON")
+    .action(async (cmd: JsonCommandOptions) => {
+      const { runVerify, formatVerify } = await import("./verify.js");
+      const report = runVerify();
+      io.stdout(cmd.json ? jsonLine(report) : `${formatVerify(report)}\n`);
+      if (!report.ok) process.exitCode = 1;
     });
 
   const debugCmd = program
@@ -389,12 +503,9 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const input = await readStdin();
       if (input.trim().length === 0) return;
       try {
-        // Parse to validate the payload is well-formed JSON (fail-open on
-        // garbage), but turn accounting is owned by the proxy now — the hook
-        // performs no recording.
-        JSON.parse(input);
+        const parsed = JSON.parse(input) as Record<string, unknown>;
         if (name === "user-prompt-submit" || name === "stop") {
-          handleHookEvent();
+          await handleHookEvent(env, parsed);
         }
       } catch {
         // Fail open — don't crash Claude Code
@@ -518,6 +629,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const { resolve } = await import("node:path");
       const { loadScenarioSpecs } = await import("../agent-traces/scenarios.js");
       const { createClaudeCodeAdapter } = await import("../agent-traces/providers/claude-code.js");
+      const { createFakeAdapter } = await import("../agent-traces/providers/fake.js");
       const { normalizeTrace } = await import("../agent-traces/normalizer.js");
       const { extractBilledUsage } = await import("../benchmark/usage-extract.js");
       const { runDuel, renderDuelMarkdown } = await import("../benchmark/index.js");
@@ -526,7 +638,12 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       const runId = cmd.runId ?? new Date().toISOString().replace(/[:.]/g, "-");
       const configPath = cachelaneConfigPath(env);
       const scenarios = loadScenarioSpecs(cmd.scenarioDir);
-      const adapter = createClaudeCodeAdapter();
+      // Estimate-only is the free, CI-safe path and must NOT shell out to Claude
+      // Code. The fake adapter synthesizes a deterministic trace with real prompt
+      // blocks from each scenario spec, which is what the deterministic estimate
+      // is computed from. The claude-code dry-run only emits placeholder text
+      // with no blocks, which yields an all-zero (broken-looking) report.
+      const adapter = cmd.estimateOnly ? createFakeAdapter() : createClaudeCodeAdapter();
       const runDir = resolve(process.cwd(), "benchmark", "runs", runId);
       mkdirSync(runDir, { recursive: true });
 
@@ -539,17 +656,48 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
           now: () => new Date(),
           runScenarioSession: async (scenarioId: string) => {
             const scenario = scenarios.find((s) => s.id === scenarioId)!;
-            const raw = await adapter.runScenario(scenario, {
-              dry_run: cmd.estimateOnly,
-              run_id: runId,
-              run_dir: runDir,
-              now: () => new Date(),
-            });
-            const normalized = normalizeTrace(raw);
-            const billed = raw.transcript_path
-              ? extractBilledUsage(raw.transcript_path)
-              : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
-            return { normalized, transcriptPath: raw.transcript_path, billed };
+            const { dirname, resolve: pathResolve } = await import("node:path");
+            const { mkdirSync, writeFileSync, unlinkSync, existsSync } = await import("node:fs");
+
+            const createdPaths: string[] = [];
+            const originalContents = new Map<string, string>();
+            
+            for (const file of scenario.workspace_files) {
+              const fullPath = pathResolve(process.cwd(), file.path);
+              if (existsSync(fullPath)) {
+                const { readFileSync } = await import("node:fs");
+                originalContents.set(fullPath, readFileSync(fullPath, "utf8"));
+              } else {
+                createdPaths.push(fullPath);
+              }
+              mkdirSync(dirname(fullPath), { recursive: true });
+              writeFileSync(fullPath, file.content, "utf8");
+            }
+
+            try {
+              const raw = await adapter.runScenario(scenario, {
+                dry_run: cmd.estimateOnly,
+                run_id: runId,
+                run_dir: runDir,
+                now: () => new Date(),
+              });
+              const normalized = normalizeTrace(raw);
+              const billed = raw.transcript_path
+                ? extractBilledUsage(raw.transcript_path)
+                : { input_tokens: 0, cache_read_tokens: 0, cache_creation_tokens: 0 };
+              return { normalized, transcriptPath: raw.transcript_path, billed };
+            } finally {
+              // Restore only the files this scenario touched. Do NOT run
+              // `git checkout .` here — it discards ALL uncommitted changes in
+              // the user's working tree, not just scenario files (a data-loss
+              // bug). The explicit save/restore below is surgical and safe.
+              for (const fullPath of createdPaths) {
+                if (existsSync(fullPath)) unlinkSync(fullPath);
+              }
+              for (const [fullPath, content] of originalContents.entries()) {
+                writeFileSync(fullPath, content, "utf8");
+              }
+            }
           },
         },
       );

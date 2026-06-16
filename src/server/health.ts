@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CachelaneMcpContext } from "./tools.js";
+import { computeFallbackRate } from "../cli/doctor.js";
 
 export const healthInputSchema = z.object({});
 
@@ -21,7 +22,7 @@ export function handleHealthTool(
     limit: 20,
   });
 
-  const total = recentExplanations.length;
+  const { fallback_count, total, fraction } = computeFallbackRate(recentExplanations);
   if (total === 0) {
     return {
       status: "ok",
@@ -29,11 +30,8 @@ export function handleHealthTool(
     };
   }
 
-  const fallbackCount = recentExplanations.filter((ex) => !ex.mutated).length;
-  const fallbackPercentage = fallbackCount / total;
-
-  const status = fallbackPercentage > 0.05 ? "degraded" : "ok";
-  const explanation = `${fallbackCount} of the last ${total} workspace turns used fallback mode.`;
+  const status = fraction > 0.05 ? "degraded" : "ok";
+  const explanation = `${fallback_count} of the last ${total} workspace turns used fallback mode.`;
 
   return {
     status,

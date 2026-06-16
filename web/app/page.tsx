@@ -19,6 +19,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { TopNav } from '@/components/nav/top-nav';
 import { FadeIn, standardEase } from '@/components/motion/fade-in';
+import { DemoVideo } from '@/components/demo/demo-video';
 
 export default function HomePage() {
   const [copied, setCopied] = useState(false);
@@ -109,6 +110,9 @@ export default function HomePage() {
               </FadeIn>
             </div>
 
+          </div>
+          <div className="w-full">
+            <DemoVideo />
           </div>
         </div>
       </section>
