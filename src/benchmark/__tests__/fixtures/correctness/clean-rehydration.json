@@ -1,0 +1,33 @@
+{
+  "session_id": "corr-clean",
+  "provider": "fake",
+  "scenario_id": "clean-rehydration",
+  "source": {},
+  "turns": [
+    {
+      "turn_number": 0,
+      "assistant_text": "Reading config.ts",
+      "tool_calls": [{ "name": "Read", "input": { "file_path": "src/config.ts" } }],
+      "blocks_in_prompt": [
+        { "id": "blockaaa", "id_token": "blockaaa", "kind": "tool_output", "file_path": "src/config.ts", "content": "export const TTL = 300;" }
+      ]
+    },
+    {
+      "turn_number": 1,
+      "assistant_text": "Unrelated work",
+      "tool_calls": [{ "name": "Read", "input": { "file_path": "src/other.ts" } }],
+      "blocks_in_prompt": [
+        { "id": "blockaaa", "id_token": "blockaaa", "kind": "tool_output", "file_path": "src/config.ts", "content": "export const TTL = 300;" },
+        { "id": "blockbbb", "id_token": "blockbbb", "kind": "tool_output", "file_path": "src/other.ts", "content": "export const X = 1;" }
+      ]
+    },
+    {
+      "turn_number": 4,
+      "assistant_text": "Back to src/config.ts to check TTL",
+      "tool_calls": [{ "name": "Read", "input": { "file_path": "src/config.ts" } }],
+      "blocks_in_prompt": [
+        { "id": "blockaaa", "id_token": "blockaaa", "kind": "tool_output", "file_path": "src/config.ts", "content": "export const TTL = 300;" }
+      ]
+    }
+  ]
+}

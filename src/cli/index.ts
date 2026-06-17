@@ -16,7 +16,7 @@ import {
   setPrunerMode,
   setTelemetryOptIn,
 } from "./config.js";
-import { formatDoctor, runDoctor } from "./doctor.js";
+import { formatDoctor, runDoctorAsync } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
@@ -31,6 +31,7 @@ import {
   type CachelaneMcpContext,
 } from "../server/tools.js";
 import type { CachelaneConfig } from "../types/index.js";
+import type { RecordedBenchmarkReport } from "../benchmark/types.js";
 
 export interface CliIo {
   stdout: (text: string) => void;
@@ -385,6 +386,59 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     });
 
   program
+    .command("report")
+    .description("Generate a self-contained HTML report from the local SQLite data")
+    .option("--scope <scope>", "report scope", parseStatsScope, "workspace")
+    .option("--session-id <id>", "Session scope")
+    .option("--workspace-id <id>", "Workspace scope")
+    .option("--db <path>", "SQLite database path")
+    .option("--out <path>", "Output HTML path")
+    .option("--benchmark <path>", "Embed a recorded benchmark-report.json as extra tabs")
+    .option("--no-open", "Write the file but do not open a browser")
+    .option("--json", "Print ReportData JSON instead of writing HTML")
+    .action(async (cmd: JsonCommandOptions & {
+      scope: "session" | "workspace" | "all";
+      sessionId?: string; workspaceId?: string; db?: string; out?: string; open?: boolean; benchmark?: string;
+    }) => {
+      const { generateReport, openInBrowser, buildReportData } = await import("../report/index.js");
+      const { context, close } = contextFromOptions(env, cmd);
+      try {
+        const opts = {
+          scope: cmd.scope,
+          workspace_id: context.workspace_id,
+          session_id: context.session_id,
+          generated_at: new Date().toISOString(),
+        };
+        if (cmd.json) {
+          io.stdout(jsonLine(buildReportData(context.db, opts)));
+          return;
+        }
+        let benchmark: RecordedBenchmarkReport | undefined;
+        if (cmd.benchmark) {
+          try {
+            const raw = JSON.parse(fs.readFileSync(cmd.benchmark, "utf8")) as RecordedBenchmarkReport;
+            if (raw && typeof raw === "object" && raw.privacy?.content_persisted === false && Array.isArray(raw.scenarios)) {
+              benchmark = raw;
+            } else {
+              io.stderr(`cachelane: ignoring --benchmark ${cmd.benchmark}: not a content-free benchmark report\n`);
+            }
+          } catch (err) {
+            io.stderr(`cachelane: ignoring --benchmark ${cmd.benchmark}: ${err instanceof Error ? err.message : String(err)}\n`);
+          }
+        }
+        const outPath = cmd.out ?? path.join(cachelaneHome(env), "report.html");
+        const result = generateReport(context.db, opts, outPath, benchmark);
+        io.stdout(`wrote ${result.out_path} (${result.turns} turns, ${result.sessions} sessions)\n`);
+        if (cmd.open !== false) {
+          openInBrowser(result.out_path);
+          io.stdout("opening in browser...\n");
+        }
+      } finally {
+        close();
+      }
+    });
+
+  program
     .command("prune")
     .description("Set K-pruner mode")
     .option("--aggressive", "K=2")
@@ -444,9 +498,21 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .command("doctor")
     .description("Check local CacheLane installation health")
     .option("--json", "Print stable JSON")
-    .action((cmd: JsonCommandOptions) => {
-      const report = runDoctor(env);
+    .option("--probe", "Probe a chained upstream's reachability (outbound connection)")
+    .action(async (cmd: JsonCommandOptions & { probe?: boolean }) => {
+      const report = await runDoctorAsync(env, { probe: Boolean(cmd.probe) });
       io.stdout(cmd.json ? jsonLine(report) : `${formatDoctor(report)}\n`);
+    });
+
+  program
+    .command("verify")
+    .description("Self-test that the CacheLane pipeline mutates, stubs, and rehydrates losslessly")
+    .option("--json", "Print stable JSON")
+    .action(async (cmd: JsonCommandOptions) => {
+      const { runVerify, formatVerify } = await import("./verify.js");
+      const report = runVerify();
+      io.stdout(cmd.json ? jsonLine(report) : `${formatVerify(report)}\n`);
+      if (!report.ok) process.exitCode = 1;
     });
 
   const debugCmd = program
@@ -567,6 +633,28 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
         normalized_dir: trace,
       });
       io.stdout(output + "\n");
+    });
+
+  benchmarkCmd
+    .command("correctness")
+    .description("Measure rehydration recall + stale-answer rate on a recorded trace")
+    .argument("<trace>", "Path to normalized trace directory")
+    .option("--k <number>", "Pruner K", (v) => parseInt(v, 10), 3)
+    .option("--json", "Print stable JSON")
+    .action(async (trace: string, cmd: { k: number; json?: boolean }) => {
+      const { loadNormalizedTraceSessions } = await import("../benchmark/recorded.js");
+      const { generateCorrectnessReport, formatCorrectnessMarkdown } = await import(
+        "../benchmark/index.js"
+      );
+      const sessions = loadNormalizedTraceSessions(trace);
+      const report = generateCorrectnessReport({
+        run_id: "cli",
+        generated_at: new Date().toISOString(),
+        sessions,
+        k: cmd.k,
+        normalized_dir: trace,
+      });
+      io.stdout(cmd.json ? jsonLine(report) : `${formatCorrectnessMarkdown(report)}\n`);
     });
 
   benchmarkCmd

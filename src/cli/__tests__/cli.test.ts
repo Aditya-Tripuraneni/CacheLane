@@ -132,6 +132,54 @@ afterEach(() => {
 });
 
 describe("cachelane CLI", () => {
+  it("report --benchmark embeds the benchmark panels in the HTML", async () => {
+    const benchmarkPath = path.join(tmpDir, "benchmark-report.json");
+    fs.writeFileSync(
+      benchmarkPath,
+      JSON.stringify({
+        run_id: "r1",
+        generated_at: "2026-06-16T00:00:00Z",
+        source: { kind: "normalized_trace", provider: "fake", normalized_dir: null, model: "m" },
+        counts: { sessions: 1, turns: 2, blocks: 3, tool_calls: 1 },
+        totals: {
+          input_tokens: 100, cache_read_tokens: 400, baseline_cost_units: 500,
+          effective_cost_units: 140, savings_ratio: 0.72, cache_hit_ratio: 0.8,
+          pruned_blocks: 1, keepalive_pings: 0,
+        },
+        scenarios: [
+          { scenario_id: "read-summarize-file", session_id: "s1", turns: 2, blocks: 3, tool_calls: 1,
+            input_tokens: 100, cache_read_tokens: 400, baseline_cost_units: 500, effective_cost_units: 140,
+            savings_ratio: 0.72, cache_hit_ratio: 0.8, pruned_blocks: 1, keepalive_pings: 0 },
+        ],
+        privacy: { content_persisted: false },
+      }),
+    );
+    const outPath = path.join(tmpDir, "report.html");
+    await run(["report", "--out", outPath, "--no-open", "--benchmark", benchmarkPath]);
+    const html = fs.readFileSync(outPath, "utf-8");
+    expect(html).toContain('id="p-usage"');
+    expect(html).toContain('id="p-totals"');
+    expect(html).toContain('id="p-scenarios"');
+    expect(html).toContain("read-summarize-file");
+  });
+
+  it("report --benchmark fails open on an unreadable benchmark file", async () => {
+    const badPath = path.join(tmpDir, "garbage.json");
+    fs.writeFileSync(badPath, "{not valid json");
+    const outPath = path.join(tmpDir, "report.html");
+    let stderr = "";
+    const program = createCachelaneCli({
+      env,
+      io: { stdout: () => {}, stderr: (t) => { stderr += t; } },
+    });
+    program.exitOverride();
+    await program.parseAsync(["node", "cachelane", "report", "--out", outPath, "--no-open", "--benchmark", badPath]);
+    const html = fs.readFileSync(outPath, "utf-8");
+    expect(html).toContain('id="p-usage"');
+    expect(html).not.toContain('id="p-totals"');
+    expect(stderr).toMatch(/benchmark/i);
+  });
+
   it("config mutation commands update only intended fields", async () => {
     const configPath = path.join(env.CACHELANE_HOME!, "config.json");
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -285,7 +333,16 @@ describe("cachelane CLI", () => {
       "mcp",
       "hooks",
       "data",
+      "upstream",
+      "fallback_rate",
+      "cache_reads",
     ]);
+  });
+
+  it("verify --json reports ok true on a healthy pipeline", async () => {
+    const output = await run(["verify", "--json"]);
+    const report = JSON.parse(output);
+    expect(report.ok).toBe(true);
   });
 
   it("debug pruner returns recent pruner log entries as parseable JSON", async () => {
@@ -414,6 +471,175 @@ describe("cachelane CLI", () => {
     await run(["install"]);
     await run(["uninstall", "--purge"]);
     expect(fs.existsSync(env.CACHELANE_HOME!)).toBe(false);
+  });
+
+  it("benchmark correctness emits JSON with recall/stale totals", async () => {
+    const stdout = await run([
+      "benchmark",
+      "correctness",
+      "src/benchmark/__tests__/fixtures/correctness",
+      "--json",
+    ]);
+    const report = JSON.parse(stdout);
+    expect(report.privacy.content_persisted).toBe(false);
+    expect(typeof report.totals.rehydration_recall).toBe("number");
+  });
+
+  it("report --json emits content-free ReportData", async () => {
+    const output = await run(["report", "--json"]);
+    const data = JSON.parse(output);
+    expect(data.privacy.content_persisted).toBe(false);
+    expect(Array.isArray(data.turns)).toBe(true);
+  });
+});
+
+describe("cachelane CLI workspace scoping", () => {
+  function dbAt(): CliDb {
+    return openDatabase(path.join(env.CACHELANE_HOME!, "cachelane.db"));
+  }
+
+  // S1: the regression. The recorder writes turns under the cwd-derived
+  // workspace id, but `stats` must resolve to that same workspace by default
+  // (not the literal "default") so `--scope session` finds the data with no flags.
+  it("stats --scope session finds turns under the cwd workspace with no flags", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, {
+      id: "t-s1",
+      workspace_id: defaultWorkspaceId(),
+      session_id: "sess-1",
+      pruned_blocks_count: 4,
+    });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      turns: 1,
+      pruner_counts: { pruned_blocks: 4 },
+    });
+  });
+
+  // S2 / W2: an explicit --workspace-id flag still works (and outranks env).
+  it("stats --scope session honors an explicit --workspace-id flag", async () => {
+    const ws = defaultWorkspaceId();
+    const db = dbAt();
+    seedTurn(db, { id: "t-s2", workspace_id: ws, session_id: "sess-1" });
+    db.close();
+
+    const output = await run([
+      "stats",
+      "--workspace-id",
+      ws,
+      "--session-id",
+      "sess-1",
+      "--scope",
+      "session",
+      "--json",
+    ]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 1 });
+  });
+
+  // S3: scoping must stay correct — turns in a *different* workspace are not counted.
+  it("stats --scope session does not match turns from a different workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, { id: "t-s3", workspace_id: "some-other-ws", session_id: "sess-1" });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 0 });
+  });
+
+  // S4: with no --session-id, resolveSessionId picks the most recent session in
+  // the resolved workspace. pruned_blocks=7 marks the newer session uniquely.
+  it("stats --scope session auto-resolves to the most recent session in the workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    delete env.CACHELANE_SESSION_ID;
+    const ws = defaultWorkspaceId();
+    const db = dbAt();
+    seedTurn(db, {
+      id: "t-old",
+      workspace_id: ws,
+      session_id: "older",
+      created_at: 1_000,
+      pruned_blocks_count: 3,
+    });
+    seedTurn(db, {
+      id: "t-new",
+      workspace_id: ws,
+      session_id: "newer",
+      created_at: 2_000,
+      pruned_blocks_count: 7,
+    });
+    db.close();
+
+    const output = await run(["stats", "--scope", "session", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      turns: 1,
+      pruner_counts: { pruned_blocks: 7 },
+    });
+  });
+
+  // W4: --workspace-id flag overrides a (non-matching) CACHELANE_WORKSPACE_ID env.
+  it("explicit --workspace-id overrides the CACHELANE_WORKSPACE_ID env var", async () => {
+    env.CACHELANE_WORKSPACE_ID = "ws-env-empty";
+    const db = dbAt();
+    seedTurn(db, { id: "t-w4", workspace_id: "ws-flag", session_id: "sess-1" });
+    db.close();
+
+    const output = await run([
+      "stats",
+      "--workspace-id",
+      "ws-flag",
+      "--session-id",
+      "sess-1",
+      "--scope",
+      "session",
+      "--json",
+    ]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 1 });
+  });
+
+  // E1: explain has the same default-workspace bug; it must find the explanation
+  // under the cwd workspace with no flags.
+  it("explain finds the explanation under the cwd workspace with no flags", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedExplanation(db, {
+      workspace_id: defaultWorkspaceId(),
+      session_id: "sess-1",
+      turn_number: 1,
+    });
+    db.close();
+
+    const output = await run(["explain", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({
+      found: true,
+      explanation: { turn_number: 1 },
+    });
+  });
+
+  // E2: explain scoping guard — an explanation in another workspace is not returned.
+  it("explain returns found=false when the explanation is in a different workspace", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedExplanation(db, { workspace_id: "some-other-ws", session_id: "sess-1", turn_number: 1 });
+    db.close();
+
+    const output = await run(["explain", "--json"]);
+    expect(JSON.parse(output)).toEqual({ found: false });
+  });
+
+  // R2: scope=all ignores workspace entirely and aggregates across workspaces.
+  it("stats --scope all aggregates turns across workspaces", async () => {
+    delete env.CACHELANE_WORKSPACE_ID;
+    const db = dbAt();
+    seedTurn(db, { id: "t-all-1", workspace_id: defaultWorkspaceId(), session_id: "s" });
+    seedTurn(db, { id: "t-all-2", workspace_id: "other-ws", session_id: "s" });
+    db.close();
+
+    const output = await run(["stats", "--scope", "all", "--json"]);
+    expect(JSON.parse(output)).toMatchObject({ turns: 2 });
   });
 });
 
