@@ -8,6 +8,7 @@ import {
   generateRecordedBenchmarkReport,
   loadNormalizedTraceSessions,
 } from "../../src/benchmark/index.js";
+import { renderRecordedBenchmarkHtml } from "../../src/benchmark/render-html.js";
 
 const { values } = parseArgs({
   options: {
@@ -19,6 +20,7 @@ const { values } = parseArgs({
     "run-id": { type: "string" },
     model: { type: "string", default: "claude-opus-4-7" },
     markdown: { type: "boolean", default: false },
+    html: { type: "string" },
   },
 });
 
@@ -79,6 +81,18 @@ if (values.markdown) {
   await writeFile(markdownPath, formatBenchmarkMarkdown(report), "utf8");
 }
 
+let htmlPath: string | null = null;
+if (values.html) {
+  try {
+    htmlPath = resolve(values.html);
+    await writeFile(htmlPath, renderRecordedBenchmarkHtml(report), "utf8");
+  } catch (err) {
+    // fail-open: never let report rendering break the benchmark run
+    console.error(`[benchmark] HTML report write failed: ${err instanceof Error ? err.message : String(err)}`);
+    htmlPath = null;
+  }
+}
+
 console.log(
   JSON.stringify(
     {
@@ -87,6 +101,7 @@ console.log(
       normalized_dir: normalizedDir,
       report_path: reportPath,
       markdown_path: markdownPath,
+      html_path: htmlPath,
       totals: report.totals,
     },
     null,

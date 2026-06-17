@@ -1,6 +1,6 @@
 {
   "name": "cachelane",
-  "version": "1.0.19",
+  "version": "1.1.0",
   "description": "Cache-aware prompt orchestration for Claude Code",
   "license": "Apache-2.0",
   "type": "module",
@@ -16,6 +16,7 @@
     "test:watch": "vitest",
     "lint": "eslint src",
     "benchmark:recorded": "tsx scripts/benchmark/run-recorded.ts --provider fake --run-id recorded-local --markdown",
+    "benchmark:correctness": "tsx scripts/benchmark/run-correctness.ts",
     "doctor:ci": "tsx scripts/doctor-ci.ts",
     "postinstall": "node scripts/postinstall.mjs 2>/dev/null || true"
   },

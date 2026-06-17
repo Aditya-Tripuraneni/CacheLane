@@ -44,3 +44,38 @@ export interface RecordedBenchmarkReport {
     content_persisted: false;
   };
 }
+
+export interface CorrectnessScenarioRow {
+  scenario_id: string;
+  session_id: string;
+  k: number;
+  stubbed_blocks: number;
+  stubbed_then_referenced: number;
+  restored_correctly: number;
+  needed_blocks: number;
+  needed_but_unavailable: number;
+  rehydration_recall: number;
+  stale_answer_rate: number;
+}
+
+export interface CorrectnessReport {
+  run_id: string;
+  generated_at: string;
+  k: number;
+  source: {
+    kind: "normalized_trace";
+    provider: string | null;
+    normalized_dir: string | null;
+  };
+  totals: {
+    stubbed_blocks: number;
+    stubbed_then_referenced: number;
+    restored_correctly: number;
+    needed_blocks: number;
+    needed_but_unavailable: number;
+    rehydration_recall: number;
+    stale_answer_rate: number;
+  };
+  scenarios: CorrectnessScenarioRow[];
+  privacy: { content_persisted: false };
+}

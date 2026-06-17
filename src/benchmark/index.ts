@@ -13,4 +13,11 @@ export { runLiveAbTest } from "./live-ab-test.js";
 export { runDashboard } from "./dashboard.js";
 export { runDuel, type DuelDeps, type RunDuelOptions } from "./duel.js";
 export { buildDuelReport, renderDuelMarkdown, type DuelReport } from "./duel-report.js";
+export {
+  computeCorrectnessForSession,
+  generateCorrectnessReport,
+  formatCorrectnessMarkdown,
+} from "./correctness.js";
+export type { GenerateCorrectnessOptions } from "./correctness.js";
+export type { CorrectnessReport, CorrectnessScenarioRow } from "./types.js";
 

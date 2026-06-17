@@ -132,6 +132,54 @@ afterEach(() => {
 });
 
 describe("cachelane CLI", () => {
+  it("report --benchmark embeds the benchmark panels in the HTML", async () => {
+    const benchmarkPath = path.join(tmpDir, "benchmark-report.json");
+    fs.writeFileSync(
+      benchmarkPath,
+      JSON.stringify({
+        run_id: "r1",
+        generated_at: "2026-06-16T00:00:00Z",
+        source: { kind: "normalized_trace", provider: "fake", normalized_dir: null, model: "m" },
+        counts: { sessions: 1, turns: 2, blocks: 3, tool_calls: 1 },
+        totals: {
+          input_tokens: 100, cache_read_tokens: 400, baseline_cost_units: 500,
+          effective_cost_units: 140, savings_ratio: 0.72, cache_hit_ratio: 0.8,
+          pruned_blocks: 1, keepalive_pings: 0,
+        },
+        scenarios: [
+          { scenario_id: "read-summarize-file", session_id: "s1", turns: 2, blocks: 3, tool_calls: 1,
+            input_tokens: 100, cache_read_tokens: 400, baseline_cost_units: 500, effective_cost_units: 140,
+            savings_ratio: 0.72, cache_hit_ratio: 0.8, pruned_blocks: 1, keepalive_pings: 0 },
+        ],
+        privacy: { content_persisted: false },
+      }),
+    );
+    const outPath = path.join(tmpDir, "report.html");
+    await run(["report", "--out", outPath, "--no-open", "--benchmark", benchmarkPath]);
+    const html = fs.readFileSync(outPath, "utf-8");
+    expect(html).toContain('id="p-usage"');
+    expect(html).toContain('id="p-totals"');
+    expect(html).toContain('id="p-scenarios"');
+    expect(html).toContain("read-summarize-file");
+  });
+
+  it("report --benchmark fails open on an unreadable benchmark file", async () => {
+    const badPath = path.join(tmpDir, "garbage.json");
+    fs.writeFileSync(badPath, "{not valid json");
+    const outPath = path.join(tmpDir, "report.html");
+    let stderr = "";
+    const program = createCachelaneCli({
+      env,
+      io: { stdout: () => {}, stderr: (t) => { stderr += t; } },
+    });
+    program.exitOverride();
+    await program.parseAsync(["node", "cachelane", "report", "--out", outPath, "--no-open", "--benchmark", badPath]);
+    const html = fs.readFileSync(outPath, "utf-8");
+    expect(html).toContain('id="p-usage"');
+    expect(html).not.toContain('id="p-totals"');
+    expect(stderr).toMatch(/benchmark/i);
+  });
+
   it("config mutation commands update only intended fields", async () => {
     const configPath = path.join(env.CACHELANE_HOME!, "config.json");
     fs.mkdirSync(path.dirname(configPath), { recursive: true });
@@ -423,6 +471,25 @@ describe("cachelane CLI", () => {
     await run(["install"]);
     await run(["uninstall", "--purge"]);
     expect(fs.existsSync(env.CACHELANE_HOME!)).toBe(false);
+  });
+
+  it("benchmark correctness emits JSON with recall/stale totals", async () => {
+    const stdout = await run([
+      "benchmark",
+      "correctness",
+      "src/benchmark/__tests__/fixtures/correctness",
+      "--json",
+    ]);
+    const report = JSON.parse(stdout);
+    expect(report.privacy.content_persisted).toBe(false);
+    expect(typeof report.totals.rehydration_recall).toBe("number");
+  });
+
+  it("report --json emits content-free ReportData", async () => {
+    const output = await run(["report", "--json"]);
+    const data = JSON.parse(output);
+    expect(data.privacy.content_persisted).toBe(false);
+    expect(Array.isArray(data.turns)).toBe(true);
   });
 });
 

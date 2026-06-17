@@ -1,0 +1,22 @@
+{
+  "session_id": "corr-noref",
+  "provider": "fake",
+  "scenario_id": "stub-never-referenced",
+  "source": {},
+  "turns": [
+    {
+      "turn_number": 0,
+      "assistant_text": "Reading temp.ts",
+      "tool_calls": [{ "name": "Read", "input": { "file_path": "src/temp.ts" } }],
+      "blocks_in_prompt": [
+        { "id": "blockccc", "id_token": "blockccc", "kind": "tool_output", "file_path": "src/temp.ts", "content": "scratch" }
+      ]
+    },
+    {
+      "turn_number": 5,
+      "assistant_text": "Done, unrelated final answer",
+      "tool_calls": [],
+      "blocks_in_prompt": []
+    }
+  ]
+}
