@@ -20,4 +20,12 @@ export {
 } from "./correctness.js";
 export type { GenerateCorrectnessOptions } from "./correctness.js";
 export type { CorrectnessReport, CorrectnessScenarioRow } from "./types.js";
+export {
+  measurePipelineLatency,
+  formatLatencyMarkdown,
+  buildReplayRequest,
+  seedBlocksForTurn,
+  type LatencyBenchmarkOptions,
+} from "./latency.js";
+export type { LatencyReport, StageLatencyStats, LatencyScenarioRow } from "./types.js";
 
