@@ -217,7 +217,7 @@ export function computeBlockPlacements(
   return placements;
 }
 
-function classifyAllMessages(
+export function classifyAllMessages(
   messages: AnthropicMessage[],
   currentTurn: number,
   config: ReturnType<typeof loadConfig>,

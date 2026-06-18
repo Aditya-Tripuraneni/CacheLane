@@ -17,6 +17,7 @@
     "lint": "eslint src",
     "benchmark:recorded": "tsx scripts/benchmark/run-recorded.ts --provider fake --run-id recorded-local --markdown",
     "benchmark:correctness": "tsx scripts/benchmark/run-correctness.ts",
+    "bench:latency": "tsx scripts/benchmark/run-latency.ts --run-id latency-local --markdown",
     "doctor:ci": "tsx scripts/doctor-ci.ts",
     "postinstall": "node scripts/postinstall.mjs 2>/dev/null || true"
   },

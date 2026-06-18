@@ -79,3 +79,36 @@ export interface CorrectnessReport {
   scenarios: CorrectnessScenarioRow[];
   privacy: { content_persisted: false };
 }
+
+export interface StageLatencyStats {
+  stage: string;
+  samples: number;
+  mean_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  max_ms: number;
+}
+
+export interface LatencyScenarioRow {
+  scenario_id: string;
+  session_id: string;
+  turns: number;
+  total_p95_ms: number;
+}
+
+export interface LatencyReport {
+  run_id: string;
+  generated_at: string;
+  source: {
+    kind: "normalized_trace";
+    provider: string | null;
+    normalized_dir: string | null;
+    model: string;
+  };
+  config: { warmup: number; iterations: number };
+  counts: { sessions: number; turns: number };
+  stages: StageLatencyStats[];
+  scenarios: LatencyScenarioRow[];
+  privacy: { content_persisted: false };
+}

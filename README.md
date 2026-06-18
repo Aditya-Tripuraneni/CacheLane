@@ -8,6 +8,8 @@
 >
 > CacheLane sits between Claude Code and `api.anthropic.com` and reorganizes each turn's prompt so Anthropic's prompt cache fires far more often, then prunes stale tool output. The result is **30% to 60% lower input-token cost** on long sessions, with **zero change to how you use Claude Code**.
 >
+> **Measured pipeline overhead: < 35 ms p95 per turn** on a representative dev machine (in-process micro-benchmark; see [`docs/benchmarks/latency-baseline-2026-06-18.md`](docs/benchmarks/latency-baseline-2026-06-18.md)). The dominant cost is SHA-256 prefix hashing in the orchestrate stage (~30 ms); classify, prune, and DB operations are each < 0.2 ms. Run `npm run bench:latency` to measure on your own hardware.
+>
 > 🌐 **Website:** [cache-lane.vercel.app](https://cache-lane.vercel.app/)
 
 <video src="https://github.com/Aditya-Tripuraneni/CacheLane/raw/main/web/public/cachelane.mp4" width="100%" controls autoplay loop muted></video>
@@ -206,7 +208,7 @@ So a single auto-launched process owns everything. That's why you never start an
 For each turn the proxy:
 
 1. Intercepts the outgoing request from Claude Code.
-2. Runs the pipeline (**classify → prune → place `cache_control` breakpoints**).
+2. Runs the pipeline (**classify → prune → place `cache_control` breakpoints**) — measured at **< 35 ms p95** per turn.
 3. Forwards the optimized request to `api.anthropic.com` and streams the response straight back.
 4. Logs metadata (hashes, token counts, hit ratios) to local SQLite.
 
