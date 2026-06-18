@@ -29,10 +29,14 @@ export function generateReport(
 }
 
 export function openInBrowser(filePath: string): void {
-  const cmd = platform === "darwin" ? "open" : platform === "win32" ? "start" : "xdg-open";
-  const args = platform === "win32" ? ["", filePath] : [filePath];
   try {
-    const child = execFile(cmd, args, () => { /* best-effort; ignore errors */ });
+    if (platform === "win32") {
+      const child = execFile("cmd", ["/c", "start", "", filePath], () => { /* best-effort; ignore errors */ });
+      child.unref?.();
+      return;
+    }
+    const cmd = platform === "darwin" ? "open" : "xdg-open";
+    const child = execFile(cmd, [filePath], () => { /* best-effort; ignore errors */ });
     child.unref?.();
   } catch {
     /* fail-open: never throw from opening a browser */

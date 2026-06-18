@@ -12,7 +12,7 @@ export function buildReportData(db: CachelaneDb, opts: ReportOptions): ReportDat
   });
 
   const explanations = db.getRecentTurnExplanations({
-    workspace_id: opts.workspace_id,
+    workspace_id: opts.scope === "all" ? undefined : opts.workspace_id,
     session_id: opts.scope === "session" ? opts.session_id : undefined,
     limit: 500,
   });
