@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { z } from "zod";
 import { CURRENT_CONFIG_VERSION, DEFAULT_CONFIG } from "./defaults.js";
 import type { CachelaneConfig } from "../types/index.js";
@@ -102,9 +101,13 @@ export function loadConfig(configPath: string): CachelaneConfig {
   }
 }
 
+// The fallback workspace id MUST be cwd-independent. The proxy runs inside the
+// MCP server (spawned by Claude Code from an arbitrary cwd) while `cachelane
+// report` runs from the user's terminal; a cwd-derived id would split writes
+// and reads across two workspaces, leaving the report empty. Set
+// CACHELANE_WORKSPACE_ID to partition projects within the shared global DB.
+export const DEFAULT_WORKSPACE_ID = "ws_default";
+
 export function defaultWorkspaceId(): string {
-  const cwd = process.cwd();
-  const hash = crypto.createHash("md5").update(cwd).digest("hex").slice(0, 8);
-  const base = path.basename(cwd).toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  return `ws_${base ? base + "_" : ""}${hash}`;
+  return DEFAULT_WORKSPACE_ID;
 }
