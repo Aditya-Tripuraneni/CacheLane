@@ -19,10 +19,6 @@ import {
 } from "../orchestrator/index.js";
 import { logger } from "../logger/index.js";
 
-export interface StageCollector {
-  mark(stage: string, durationNs: bigint): void;
-}
-
 export interface PreRequestInput {
   db: CachelaneDb;
   tracker: CacheStateTracker;
@@ -35,8 +31,6 @@ export interface PreRequestInput {
   block_placements: PromptBlockPlacement[];
   pruner: CachelaneConfig["pruner"];
   now_ms?: number;
-  /** Optional benchmark instrumentation. Absent in production. */
-  timings?: StageCollector;
 }
 
 export interface PreRequestResult extends MutatedRequest {
@@ -197,7 +191,6 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       return recordAndReturnFallback(input);
     }
 
-    const startPrune = input.timings ? process.hrtime.bigint() : 0n;
     const pruneResult = pruneExpiredBlocks(input.db, {
       workspace_id: input.workspace_id,
       session_id: input.session_id,
@@ -206,7 +199,6 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       enabled: input.pruner.enabled,
       now_ms: input.now_ms,
     });
-    if (input.timings) input.timings.mark("prune", process.hrtime.bigint() - startPrune);
 
     // Only materialize blocks that have a placement in the current request.
     // Blocks without placements (e.g. they've dropped out of the conversation
@@ -231,7 +223,6 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       }));
     }
 
-    const startMaterialize = input.timings ? process.hrtime.bigint() : 0n;
     const requestWithStubs =
       actionableDecisions.length === 0
         ? input.original_request
@@ -240,10 +231,8 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
             decisions: actionableDecisions,
             block_placements: input.block_placements,
           });
-    if (input.timings) input.timings.mark("materialize", process.hrtime.bigint() - startMaterialize);
 
     const effectiveClassifications = applyOneTurnSuffixWarming(input);
-    const startOrchestrate = input.timings ? process.hrtime.bigint() : 0n;
     const orchestrated = orchestrate(
       {
         workspace_id: input.workspace_id,
@@ -254,7 +243,6 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       },
       input.tracker,
     );
-    if (input.timings) input.timings.mark("orchestrate", process.hrtime.bigint() - startOrchestrate);
 
     const result = {
       ...orchestrated,
@@ -265,9 +253,7 @@ export function handlePreRequest(input: PreRequestInput): PreRequestResult {
       prune_decisions: actionableDecisions,
       effective_message_classifications: effectiveClassifications,
     };
-    const startDbRecord = input.timings ? process.hrtime.bigint() : 0n;
     recordExplanation(input, result);
-    if (input.timings) input.timings.mark("db_record", process.hrtime.bigint() - startDbRecord);
     return result;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

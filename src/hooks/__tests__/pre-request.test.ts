@@ -8,7 +8,7 @@ import type { AnthropicMessagesRequest } from "../../orchestrator/index.js";
 import { openDatabase, type CachelaneDb } from "../../storage/index.js";
 import type { Volatility } from "../../types/index.js";
 import type { PromptBlockPlacement } from "../../pruner/index.js";
-import { handlePreRequest, type StageCollector } from "../pre-request.js";
+import { handlePreRequest } from "../pre-request.js";
 
 let tmpDir: string;
 let db: CachelaneDb;
@@ -252,55 +252,6 @@ describe("handlePreRequest", () => {
       expect.stringContaining("mismatch"),
       expect.any(Object),
     );
-  });
-
-  it("invokes the collector for each inner stage when provided", () => {
-    const seen: string[] = [];
-    const timings: StageCollector = { mark: (stage) => seen.push(stage) };
-    const result = handlePreRequest({
-      db,
-      tracker: new CacheStateTracker(),
-      workspace_id: "ws-1",
-      session_id: "sess-1",
-      current_turn: 1,
-      original_request: baseRequest(),
-      message_classifications: [cl("SEMI"), cl("VOLATILE")],
-      block_placements: [],
-      pruner: { enabled: true, k: 3, mode: "default" },
-      timings,
-    });
-    expect(result).toBeDefined();
-    expect(seen).toEqual(
-      expect.arrayContaining(["prune", "materialize", "orchestrate", "db_record"]),
-    );
-  });
-
-  it("produces byte-identical output with and without a collector (zero-overhead seam)", () => {
-    // Each call gets a fresh in-memory DB and tracker so the only variable
-    // between the two invocations is the presence/absence of the timings field.
-    const makeInput = () => ({
-      db: openDatabase(":memory:"),
-      tracker: new CacheStateTracker(),
-      workspace_id: "ws-1",
-      session_id: "sess-zero-overhead",
-      current_turn: 1,
-      original_request: baseRequest(),
-      message_classifications: [cl("SEMI"), cl("VOLATILE")],
-      block_placements: [],
-      pruner: { enabled: true, k: 3, mode: "default" } as const,
-    });
-
-    const inputWithout = makeInput();
-    const without = handlePreRequest(inputWithout);
-    inputWithout.db.close();
-
-    const inputWith = makeInput();
-    const with_ = handlePreRequest({ ...inputWith, timings: { mark: () => {} } });
-    inputWith.db.close();
-
-    expect(JSON.stringify(with_.request)).toBe(JSON.stringify(without.request));
-    expect(with_.prefix_hash).toBe(without.prefix_hash);
-    expect(with_.middle_hash).toBe(without.middle_hash);
   });
 
   it("fails open with the original request when storage fails", () => {

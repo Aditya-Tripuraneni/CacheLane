@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { loadConfig, CURRENT_CONFIG_VERSION } from "../index.js";
+import { loadConfig, CURRENT_CONFIG_VERSION, defaultWorkspaceId } from "../index.js";
 import type { CachelaneConfig } from "../../types/index.js";
 
 let tmpDir: string;
@@ -141,5 +141,25 @@ describe("loadConfig", () => {
       expect.any(String)
     );
     warnSpy.mockRestore();
+  });
+});
+
+describe("defaultWorkspaceId", () => {
+  const originalCwd = process.cwd();
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+  });
+
+  // The proxy (auto-started inside the MCP server Claude Code spawns) and a
+  // manually-run `cachelane report` execute with different working directories.
+  // The default workspace id must be cwd-independent so both resolve the same
+  // workspace; otherwise turns are written to one ws_* and read from another,
+  // producing an empty/partial report.
+  it("returns the same id regardless of process.cwd()", () => {
+    const a = defaultWorkspaceId();
+    process.chdir(os.tmpdir());
+    const b = defaultWorkspaceId();
+    expect(b).toBe(a);
   });
 });
