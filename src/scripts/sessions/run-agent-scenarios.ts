@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 import { parseArgs } from "node:util";
-import { runAgentScenarios, type AgentTraceProviderName } from "../../src/agent-traces/index.js";
+import { runAgentScenarios, type AgentTraceProviderName } from "../../agent-traces/index.js";
 
 const { values } = parseArgs({
   options: {
