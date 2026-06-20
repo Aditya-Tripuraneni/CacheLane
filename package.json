@@ -17,7 +17,7 @@
     "lint": "eslint src",
     "benchmark:recorded": "tsx scripts/benchmark/run-recorded.ts --provider fake --run-id recorded-local --markdown",
     "benchmark:correctness": "tsx scripts/benchmark/run-correctness.ts",
-    "bench:latency": "tsx scripts/benchmark/run-latency.ts --run-id latency-local --markdown",
+    "benchmark:latency": "tsx scripts/benchmark/run-latency-ab.ts",
     "doctor:ci": "tsx scripts/doctor-ci.ts",
     "postinstall": "node scripts/postinstall.mjs 2>/dev/null || true"
   },
@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "^0.97.1",
+    "@tailwindcss/postcss": "^4.3.1",
     "@types/aws4": "^1.11.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.14.0",
@@ -40,11 +41,10 @@
     "@typescript-eslint/parser": "^8.0.0",
     "eslint": "^9.0.0",
     "eslint-plugin-import": "^2.29.0",
+    "tailwindcss": "^4.3.1",
     "tsup": "^8.0.0",
     "tsx": "^4.22.3",
     "typescript": "^5.4.0",
-    "tailwindcss": "^4.0.0",
-    "@tailwindcss/postcss": "^4.0.0",
     "vitest": "^2.0.0"
   }
 }

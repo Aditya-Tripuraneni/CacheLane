@@ -789,6 +789,35 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       io.stdout(`${JSON.stringify({ run_id: runId, json_path: jsonPath, markdown_path: mdPath, totals: report.totals }, null, 2)}\n`);
     });
 
+  benchmarkCmd
+    .command("latency")
+    .description("Live TTFT A/B: CacheLane proxy vs raw passthrough over recorded scenarios")
+    .option("--repeats <number>", "Repeat the suite N times to average noise (default: 3)", (v) => parseInt(v, 10), 3)
+    .option("--scenario-dir <dir>", "Scenario directory")
+    .option("--count <number>", "Only run the first N scenarios", (v) => parseInt(v, 10))
+    .option("--proxy-url <url>", "Treatment URL (default: local proxy from config)")
+    .option("--control-url <url>", "Control URL (default: api.anthropic.com or ANTHROPIC_BASE_URL)")
+    .option("--model <id>", "Model id", "claude-sonnet-4-6")
+    .option("--out <path>", "Write the JSON report to this path")
+    .option("--json", "Print the report as JSON")
+    .action(async (cmd: JsonCommandOptions & {
+      repeats: number; scenarioDir?: string; count?: number;
+      proxyUrl?: string; controlUrl?: string; model: string; out?: string;
+    }) => {
+      const { runLatencyAbCli, formatLatencyReport } = await import("../benchmark/index.js");
+      const report = await runLatencyAbCli({
+        repeats: cmd.repeats,
+        scenarioDir: cmd.scenarioDir,
+        count: cmd.count,
+        proxyUrl: cmd.proxyUrl,
+        controlUrl: cmd.controlUrl,
+        model: cmd.model,
+        out: cmd.out,
+        env,
+      });
+      io.stdout(cmd.json ? jsonLine(report) : `${formatLatencyReport(report)}\n`);
+    });
+
   return program;
 }
 
