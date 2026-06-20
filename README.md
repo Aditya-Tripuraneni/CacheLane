@@ -243,8 +243,9 @@ Sessions are keyed by Claude Code's own session id, so the value in the `cachela
 | `cachelane install` | Register the MCP server + hooks and redirect Claude Code traffic through the proxy. Idempotent. |
 | `cachelane uninstall [--purge]` | Remove the integration. `--purge` also deletes `~/.cachelane` (config + database). |
 | `cachelane doctor [--json]` | Health check: Node version, config, SQLite writability, MCP + hook registration. |
-| `cachelane stats [--scope session\|workspace\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
+| `cachelane stats [--scope session\\|workspace\\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
 | `cachelane sessions [--json]` | List all recorded sessions with hit ratio and savings. |
+| `cachelane report [--scope session\\|workspace\\|all]` | Generate and open a self-contained HTML dashboard webpage of your savings. |
 | `cachelane explain [--turn <N>] [--json]` | Show how CacheLane classified and pruned blocks, and where it placed cache breakpoints, for a turn. |
 | `cachelane config` | Print the active configuration. |
 
@@ -272,7 +273,10 @@ These are run for you or are for debugging; you normally never invoke them:
 | `cachelane mcp` | The MCP + proxy server. **Auto-started by Claude Code.** Do not run it manually. |
 | `cachelane proxy [--port]` | Standalone proxy, for setups *not* using the MCP server. Collides with the auto-started proxy if both run. |
 | `cachelane debug pruner [--limit <N>]` | Dump recent pruner debug entries as JSON. |
-| `cachelane benchmark <compare\|live-report\|ab-test\|dashboard>` | Local benchmarking / live savings dashboard. |
+| `cachelane benchmark dashboard` | Open a live terminal TUI dashboard to view real-time savings. |
+| `cachelane benchmark latency` | Live TTFT A/B test (CacheLane proxy vs raw direct) to measure speed. |
+| `cachelane benchmark duel` | Run CacheLane ON vs OFF on recorded scenarios and emit a comparison report. |
+| `cachelane benchmark <compare\\|correctness\\|live-report\\|ab-test>` | Suite of tools for offline trace comparisons, rehydration recall, and testing. |
 | `cachelane hook <name>` | Claude Code hook entrypoint (records turn stats in hook mode). |
 
 ### MCP tools (exposed to Claude)
