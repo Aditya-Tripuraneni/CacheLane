@@ -60,6 +60,27 @@ const configSchema = z.object({
       max_files: z.number().int().positive(),
     })
     .default(DEFAULT_CONFIG.logging),
+  compression: z
+    .object({
+      enabled: z.boolean().default(DEFAULT_CONFIG.compression.enabled),
+      mode: z.enum(["lossless", "balanced", "aggressive"]).default(DEFAULT_CONFIG.compression.mode),
+      exclude: z.array(z.string()).default(DEFAULT_CONFIG.compression.exclude),
+      json_max_array_items: z.number().int().positive().default(DEFAULT_CONFIG.compression.json_max_array_items),
+      compressors: z
+        .object({
+          json: z.boolean().default(DEFAULT_CONFIG.compression.compressors.json),
+          log: z.boolean().default(DEFAULT_CONFIG.compression.compressors.log),
+        })
+        .default(DEFAULT_CONFIG.compression.compressors),
+      retention: z
+        .object({
+          enabled: z.boolean().default(DEFAULT_CONFIG.compression.retention.enabled),
+          min_original_tokens: z.number().int().nonnegative().default(DEFAULT_CONFIG.compression.retention.min_original_tokens),
+          ttl_days: z.number().int().positive().default(DEFAULT_CONFIG.compression.retention.ttl_days),
+        })
+        .default(DEFAULT_CONFIG.compression.retention),
+    })
+    .default(DEFAULT_CONFIG.compression),
 });
 
 export function loadConfig(configPath: string): CachelaneConfig {

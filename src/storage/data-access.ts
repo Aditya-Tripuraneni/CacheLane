@@ -26,8 +26,12 @@ import type {
   GetRecentTurnExplanationsParams,
   GetRecentTurnParams,
   UpdateTurnUsageParams,
+  RecordCompressionOriginalParams,
+  GetCompressionOriginalParams,
+  CompressionOriginalRow,
 } from "./types.js";
 import { isCorruptionError, tryOpen } from "./recovery.js";
+import { ulid } from "ulid";
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value);
@@ -409,6 +413,48 @@ export function openDatabase(dbPath: string): CachelaneDb {
       AND volatility != 'STABLE'
   `);
 
+  const insertCompressionEventStmt = rawDb.prepare(`
+    INSERT INTO compression_events
+      (id, turn_id, session_id, workspace_id, tool_use_id,
+       content_type, original_tokens, compressed_tokens, tokens_saved,
+       compressor_id, mode, lossiness, outcome, latency_ms, token_model,
+       retention_handle, created_at)
+    VALUES
+      (@id, @turn_id, @session_id, @workspace_id, @tool_use_id,
+       @content_type, @original_tokens, @compressed_tokens, @tokens_saved,
+       @compressor_id, @mode, @lossiness, @outcome, @latency_ms, @token_model,
+       @retention_handle, @created_at)
+  `);
+
+  const insertCompressionOriginalStmt = rawDb.prepare(`
+    INSERT INTO compression_originals
+      (handle, turn_id, session_id, workspace_id, tool_use_id,
+       content_sha256, original_text, original_tokens, created_at, expires_at)
+    VALUES
+      (@handle, @turn_id, @session_id, @workspace_id, @tool_use_id,
+       @content_sha256, @original_text, @original_tokens, @created_at, @expires_at)
+  `);
+
+  const getCompressionOriginalStmt = rawDb.prepare(`
+    SELECT *
+    FROM compression_originals
+    WHERE handle = @handle
+      AND workspace_id = @workspace_id
+      AND session_id = @session_id
+      AND (expires_at IS NULL OR expires_at >= @now_ms)
+  `);
+
+  const deleteCompressionOriginalStmt = rawDb.prepare(`
+    DELETE FROM compression_originals
+    WHERE handle = @handle
+  `);
+
+  const deleteExpiredCompressionOriginalsStmt = rawDb.prepare(`
+    DELETE FROM compression_originals
+    WHERE expires_at IS NOT NULL
+      AND expires_at < @now_ms
+  `);
+
   const db = rawDb as unknown as CachelaneDb;
 
   db.insertBlock = (p: InsertBlockParams) =>
@@ -694,7 +740,92 @@ export function openDatabase(dbPath: string): CachelaneDb {
         pings: row.keepalive_pings,
         turns_with_keepalive: row.turns_with_keepalive,
       },
+      compression_counts: (() => {
+        const compRow = rawDb.prepare(`
+          SELECT
+            COALESCE(SUM(CASE WHEN tokens_saved > 0 THEN 1 ELSE 0 END), 0) AS compressed_blocks,
+            COALESCE(SUM(tokens_saved), 0) AS tokens_saved
+          FROM compression_events
+          ${where.sql}
+        `).get(where.bindings) as { compressed_blocks: number; tokens_saved: number } | undefined;
+        return {
+          compressed_blocks: compRow?.compressed_blocks ?? 0,
+          tokens_saved: compRow?.tokens_saved ?? 0,
+        };
+      })(),
     };
+  };
+
+  db.recordCompressionEvents = (
+    turnId: string,
+    sessionId: string,
+    workspaceId: string,
+    events: Array<{
+      tool_use_id: string;
+      content_type: string;
+      original_tokens: number;
+      compressed_tokens: number;
+      tokens_saved: number;
+      compressor_id?: string;
+      mode?: string;
+      lossiness?: string;
+      outcome?: string;
+      latency_ms?: number;
+      token_model?: string;
+      retention_handle?: string;
+    }>
+  ) => {
+    const now = Date.now();
+    for (const event of events) {
+      insertCompressionEventStmt.run({
+        id: ulid(),
+        turn_id: turnId,
+        session_id: sessionId,
+        workspace_id: workspaceId,
+        tool_use_id: event.tool_use_id,
+        content_type: event.content_type,
+        original_tokens: event.original_tokens,
+        compressed_tokens: event.compressed_tokens,
+        tokens_saved: event.tokens_saved,
+        compressor_id: event.compressor_id ?? null,
+        mode: event.mode ?? null,
+        lossiness: event.lossiness ?? null,
+        outcome: event.outcome ?? null,
+        latency_ms: event.latency_ms ?? null,
+        token_model: event.token_model ?? null,
+        retention_handle: event.retention_handle ?? null,
+        created_at: now,
+      });
+    }
+  };
+
+  db.recordCompressionOriginal = (params: RecordCompressionOriginalParams): string => {
+    deleteExpiredCompressionOriginalsStmt.run({ now_ms: params.created_at });
+    const handle = `cto_${ulid()}`;
+    insertCompressionOriginalStmt.run({
+      handle,
+      ...params,
+    });
+    return handle;
+  };
+
+  db.deleteCompressionOriginal = (handle: string): void => {
+    deleteCompressionOriginalStmt.run({ handle });
+  };
+
+  db.deleteExpiredCompressionOriginals = (nowMs: number): number => {
+    const result = deleteExpiredCompressionOriginalsStmt.run({ now_ms: nowMs });
+    return result.changes;
+  };
+
+  db.getCompressionOriginal = (
+    params: GetCompressionOriginalParams,
+  ): CompressionOriginalRow | null => {
+    const row = getCompressionOriginalStmt.get({
+      ...params,
+      now_ms: params.now_ms ?? Date.now(),
+    }) as CompressionOriginalRow | undefined;
+    return row ?? null;
   };
 
   db.listSessions = (workspaceId?: string) => {

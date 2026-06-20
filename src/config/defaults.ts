@@ -48,4 +48,19 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     max_file_bytes: 10_485_760,
     max_files: 5,
   },
+  compression: {
+    enabled: true,
+    mode: "lossless",
+    exclude: [],
+    json_max_array_items: 20,
+    compressors: {
+      json: true,
+      log: true,
+    },
+    retention: {
+      enabled: false,
+      min_original_tokens: 1000,
+      ttl_days: 7,
+    },
+  },
 };

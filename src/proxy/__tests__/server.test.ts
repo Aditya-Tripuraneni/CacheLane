@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { startProxy, createProxyServer } from "../server.js";
+import { DEFAULT_CONFIG } from "../../config/defaults.js";
 import { CacheStateTracker } from "../../orchestrator/index.js";
 import { openDatabase } from "../../storage/index.js";
 import type { AnthropicMessagesRequest } from "../../orchestrator/types.js";
@@ -298,6 +299,209 @@ describe("proxy pipeline integration", () => {
       const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
       expect(forwarded.tools).toBeUndefined();
       expect(forwarded.system).toBeUndefined();
+    });
+  });
+
+  describe("tool output compression — end-to-end through the proxy", () => {
+    it("compresses verbose tool_result JSON and records compression savings", async () => {
+      const verboseJson = JSON.stringify({
+        meta: { a: null, b: null, c: "keep" },
+        items: Array.from({ length: 40 }, (_, i) => ({ id: i, value: i % 2 === 0 ? null : `item-${i}` })),
+      });
+      const request: AnthropicMessagesRequest = {
+        model: "claude-opus-4-7",
+        system: [{ type: "text", text: "System." }],
+        tools: [{ name: "Read", input_schema: { type: "object" } }],
+        messages: [
+          { role: "user", content: [{ type: "text", text: "read it" }] },
+          { role: "assistant", content: [{ type: "tool_use", id: "toolu_read1", name: "Read", input: {} }] },
+          { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_read1", content: verboseJson }] },
+        ],
+        max_tokens: 1024,
+      };
+      const configPath = path.join(tmpDir, "compression-aggressive.json");
+      fs.writeFileSync(
+        configPath,
+        JSON.stringify({
+          ...DEFAULT_CONFIG,
+          compression: { ...DEFAULT_CONFIG.compression, mode: "aggressive" },
+        }, null, 2),
+      );
+      await closeServer(proxy);
+      proxy = startProxy({
+        port: 0,
+        db_path: dbPath,
+        config_path: configPath,
+        workspace_id: "test-ws",
+        session_id: "test-session",
+        upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+      });
+      proxyPort = await waitForServer(proxy);
+
+      resetFakeUpstream(nonStreamingResponseBody(), "application/json");
+      await postMessages(proxyPort, JSON.stringify(request));
+      await waitForTurn(dbPath, "test-session");
+
+      expect(lastCaptured).not.toBeNull();
+      const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+      const forwardedContent = forwarded.messages[2]!.content as Array<{ type: string; content?: unknown }>;
+      const forwardedToolResult = forwardedContent.find(
+        (block) => block.type === "tool_result",
+      ) as { type: string; content?: string } | undefined;
+      expect(forwardedToolResult).toBeDefined();
+      expect((forwardedToolResult!.content ?? "").length).toBeLessThan(verboseJson.length);
+
+      const db = openDatabase(dbPath);
+      try {
+        const stats = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "test-session" });
+        expect(stats.compression_counts.tokens_saved).toBeGreaterThan(0);
+        expect(stats.compression_counts.compressed_blocks).toBe(1);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("honors compression.enabled = false at runtime", async () => {
+      const disabledConfigPath = path.join(tmpDir, "compression-disabled.json");
+      const disabledDbPath = path.join(tmpDir, "compression-disabled.db");
+      fs.writeFileSync(
+        disabledConfigPath,
+        JSON.stringify({
+          ...DEFAULT_CONFIG,
+          compression: { ...DEFAULT_CONFIG.compression, enabled: false, mode: "aggressive" },
+        }, null, 2),
+      );
+
+      const disabledProxy = startProxy({
+        port: 0,
+        db_path: disabledDbPath,
+        config_path: disabledConfigPath,
+        workspace_id: "test-ws-disabled",
+        session_id: "test-session-disabled",
+        upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+      });
+      const disabledProxyPort = await waitForServer(disabledProxy);
+
+      try {
+        const verboseJson = JSON.stringify({
+          meta: { a: null, b: null, c: "keep" },
+          items: Array.from({ length: 32 }, (_, i) => ({ id: i, value: i % 2 === 0 ? null : `item-${i}` })),
+        });
+        const request: AnthropicMessagesRequest = {
+          model: "claude-opus-4-7",
+          system: [{ type: "text", text: "System." }],
+          tools: [{ name: "Read", input_schema: { type: "object" } }],
+          messages: [
+            { role: "user", content: [{ type: "text", text: "read it" }] },
+            { role: "assistant", content: [{ type: "tool_use", id: "toolu_disabled", name: "Read", input: {} }] },
+            { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_disabled", content: verboseJson }] },
+          ],
+          max_tokens: 1024,
+        };
+
+        resetFakeUpstream(nonStreamingResponseBody(), "application/json");
+        await postMessages(disabledProxyPort, JSON.stringify(request));
+
+        expect(lastCaptured).not.toBeNull();
+        const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+        const forwardedToolResult = forwarded.messages[2]!.content.find(
+          (block) => block.type === "tool_result",
+        ) as { type: "tool_result"; content: string };
+        expect(forwardedToolResult.content).toBe(verboseJson);
+
+        const db = openDatabase(disabledDbPath);
+        try {
+          const stats = db.getStats({
+            scope: "session",
+            workspace_id: "test-ws-disabled",
+            session_id: "test-session-disabled",
+          });
+          expect(stats.compression_counts.compressed_blocks).toBe(0);
+          expect(stats.compression_counts.tokens_saved).toBe(0);
+        } finally {
+          db.close();
+        }
+      } finally {
+        await closeServer(disabledProxy);
+      }
+    });
+
+    it("stores original tool output when retention is enabled", async () => {
+      const retentionConfigPath = path.join(tmpDir, "compression-retention.json");
+      const retentionDbPath = path.join(tmpDir, "compression-retention.db");
+      fs.writeFileSync(
+        retentionConfigPath,
+        JSON.stringify({
+          ...DEFAULT_CONFIG,
+          compression: {
+            ...DEFAULT_CONFIG.compression,
+            mode: "aggressive",
+            retention: { enabled: true, min_original_tokens: 1, ttl_days: 7 },
+          },
+        }, null, 2),
+      );
+
+      const retentionProxy = startProxy({
+        port: 0,
+        db_path: retentionDbPath,
+        config_path: retentionConfigPath,
+        workspace_id: "test-ws-retention",
+        session_id: "test-session-retention",
+        upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+      });
+      const retentionProxyPort = await waitForServer(retentionProxy);
+
+      try {
+        const verboseJson = JSON.stringify({
+          meta: { a: null, b: null, c: "keep" },
+          items: Array.from({ length: 40 }, (_, i) => ({ id: i, value: i % 2 === 0 ? null : `item-${i}` })),
+        });
+        const request: AnthropicMessagesRequest = {
+          model: "claude-opus-4-7",
+          system: [{ type: "text", text: "System." }],
+          tools: [{ name: "Read", input_schema: { type: "object" } }],
+          messages: [
+            { role: "user", content: [{ type: "text", text: "read it" }] },
+            { role: "assistant", content: [{ type: "tool_use", id: "toolu_retention", name: "Read", input: {} }] },
+            { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_retention", content: verboseJson }] },
+          ],
+          max_tokens: 1024,
+        };
+
+        resetFakeUpstream(nonStreamingResponseBody(), "application/json");
+        await postMessages(retentionProxyPort, JSON.stringify(request));
+
+        const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+        const forwardedToolResult = forwarded.messages[2]!.content.find(
+          (block) => block.type === "tool_result",
+        ) as { type: "tool_result"; content: string };
+        const forwardedJson = JSON.parse(forwardedToolResult.content) as {
+          __cachelane_compressed?: boolean;
+          retrieval_handle?: string;
+        };
+
+        const db = openDatabase(retentionDbPath);
+        try {
+          const event = db
+            .prepare("SELECT retention_handle, outcome FROM compression_events WHERE tool_use_id = ?")
+            .get("toolu_retention") as { retention_handle: string | null; outcome: string | null } | undefined;
+          expect(event?.retention_handle).toMatch(/^cto_/);
+          expect(event?.outcome).toBe("retrieval_backed");
+          expect(forwardedJson.__cachelane_compressed).toBe(true);
+          expect(forwardedJson.retrieval_handle).toBe(event!.retention_handle);
+
+          const original = db.getCompressionOriginal({
+            handle: event!.retention_handle!,
+            workspace_id: "test-ws-retention",
+            session_id: "test-session-retention",
+          });
+          expect(original?.original_text).toBe(verboseJson);
+        } finally {
+          db.close();
+        }
+      } finally {
+        await closeServer(retentionProxy);
+      }
     });
   });
 

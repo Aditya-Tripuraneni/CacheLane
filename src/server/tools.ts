@@ -21,9 +21,14 @@ export const expandInputSchema = z.object({
   block_id: z.string().min(1),
 });
 
+export const retrieveToolOutputInputSchema = z.object({
+  handle: z.string().min(1),
+});
+
 export type StatsToolInput = z.input<typeof statsInputSchema>;
 export type ExplainToolInput = z.input<typeof explainInputSchema>;
 export type ExpandToolInput = z.input<typeof expandInputSchema>;
+export type RetrieveToolOutputInput = z.input<typeof retrieveToolOutputInputSchema>;
 
 export interface CachelaneMcpContext {
   db: CachelaneDb;
@@ -126,4 +131,34 @@ export function handleExpandTool(
     turn_number: (recent?.turn_number ?? 0) + 1,
     updated_at: context.now_ms,
   });
+}
+
+export function handleRetrieveToolOutputTool(
+  context: CachelaneMcpContext,
+  rawInput: RetrieveToolOutputInput,
+): { found: false } | {
+  found: true;
+  tool_use_id: string;
+  original_text: string;
+  original_tokens: number;
+} {
+  const input = retrieveToolOutputInputSchema.parse(rawInput);
+  const targetSessionId = resolveSessionId(context);
+  const original = context.db.getCompressionOriginal({
+    handle: input.handle,
+    workspace_id: context.workspace_id,
+    session_id: targetSessionId,
+    now_ms: context.now_ms,
+  });
+
+  if (original === null) {
+    return { found: false };
+  }
+
+  return {
+    found: true,
+    tool_use_id: original.tool_use_id,
+    original_text: original.original_text,
+    original_tokens: original.original_tokens,
+  };
 }

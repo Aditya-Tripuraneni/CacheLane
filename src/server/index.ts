@@ -12,8 +12,10 @@ import {
   explainInputSchema,
   handleExpandTool,
   handleExplainTool,
+  handleRetrieveToolOutputTool,
   handleStatsTool,
   jsonTextPayload,
+  retrieveToolOutputInputSchema,
   statsInputSchema,
   type CachelaneMcpContext,
 } from "./tools.js";
@@ -87,6 +89,16 @@ export function createCachelaneMcpServer(
       inputSchema: expandInputSchema,
     },
     async (input) => jsonTextPayload(handleExpandTool(context, input)),
+  );
+
+  server.registerTool(
+    "cachelane_retrieve_tool_output",
+    {
+      title: "CacheLane Retrieve Tool Output",
+      description: "Return an original retained tool output by compression retrieval handle.",
+      inputSchema: retrieveToolOutputInputSchema,
+    },
+    async (input) => jsonTextPayload(handleRetrieveToolOutputTool(context, input)),
   );
 
   server.registerTool(

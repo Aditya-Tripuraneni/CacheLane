@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { startProxy } from "../server.js";
+import { DEFAULT_CONFIG } from "../../config/defaults.js";
 import { openDatabase } from "../../storage/index.js";
 import type { AnthropicMessagesRequest } from "../../orchestrator/types.js";
 
@@ -119,10 +120,13 @@ let tmpDir: string;
 let dbPath: string;
 let proxy: http.Server;
 let proxyPort: number;
+let originalEnvCachelaneHome: string | undefined;
 
 beforeEach(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cachelane-proxy-smoke-"));
   dbPath = path.join(tmpDir, "test.db");
+  originalEnvCachelaneHome = process.env.CACHELANE_HOME;
+  process.env.CACHELANE_HOME = tmpDir;
   resetFakeUpstream("");
 
   proxy = startProxy({
@@ -138,6 +142,11 @@ beforeEach(async () => {
 afterEach(async () => {
   await closeServer(proxy);
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (originalEnvCachelaneHome !== undefined) {
+    process.env.CACHELANE_HOME = originalEnvCachelaneHome;
+  } else {
+    delete process.env.CACHELANE_HOME;
+  }
 });
 
 describe("Pipeline smoke test — 1h TTL cost tier (§cost-formula)", () => {
@@ -240,6 +249,68 @@ describe("Pipeline smoke test (§7.2.1)", () => {
         forwardedReq2.system?.some((s) => (s as unknown as { cache_control?: unknown }).cache_control !== undefined);
       expect(hasCacheControl).toBe(true);
 
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the compression stage wired into the full pipeline", async () => {
+    const configPath = path.join(tmpDir, "compression-aggressive.json");
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify({
+        ...DEFAULT_CONFIG,
+        compression: { ...DEFAULT_CONFIG.compression, mode: "aggressive" },
+      }, null, 2),
+    );
+    await closeServer(proxy);
+    proxy = startProxy({
+      port: 0,
+      db_path: dbPath,
+      config_path: configPath,
+      workspace_id: "test-ws",
+      session_id: "test-session",
+      upstream: { host: "127.0.0.1", port: fakeUpstreamPort, ssl: false },
+    });
+    proxyPort = await waitForServer(proxy);
+
+    const verboseJson = JSON.stringify({
+      meta: { a: null, b: null, keep: "yes" },
+      rows: Array.from({ length: 48 }, (_, i) => ({ id: i, label: i % 3 === 0 ? null : `row-${i}` })),
+    });
+    const req: AnthropicMessagesRequest = {
+      model: "claude-opus-4-7",
+      system: [{ type: "text", text: "system prompt" }],
+      tools: [{ name: "Read", input_schema: { type: "object" } }],
+      messages: [
+        { role: "user", content: [{ type: "text", text: "compress this" }] },
+        { role: "assistant", content: [{ type: "tool_use", id: "toolu_compress", name: "Read", input: {} }] },
+        { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_compress", content: verboseJson }] },
+      ],
+      max_tokens: 1024,
+    };
+
+    resetFakeUpstream(sseResponseBody({
+      input_tokens: 150,
+      cache_read_input_tokens: 0,
+      cache_creation_5m_tokens: 60,
+    }));
+    await postMessages(proxyPort, JSON.stringify(req));
+    await waitForTurn(dbPath, "test-session", 1);
+
+    expect(lastCaptured).not.toBeNull();
+    const forwarded = JSON.parse(lastCaptured!.body) as AnthropicMessagesRequest;
+    const forwardedToolResult = forwarded.messages[2]!.content.find(
+      (block) => block.type === "tool_result",
+    ) as { type: "tool_result"; content: string };
+
+    expect(forwardedToolResult.content.length).toBeLessThan(verboseJson.length);
+
+    const db = openDatabase(dbPath);
+    try {
+      const stats = db.getStats({ scope: "session", workspace_id: "test-ws", session_id: "test-session" });
+      expect(stats.compression_counts.tokens_saved).toBeGreaterThan(0);
+      expect(stats.compression_counts.compressed_blocks).toBe(1);
     } finally {
       db.close();
     }

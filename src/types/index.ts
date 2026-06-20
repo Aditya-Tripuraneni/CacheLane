@@ -95,4 +95,19 @@ export interface CachelaneConfig {
     max_file_bytes: number;
     max_files: number;
   };
+  compression: {
+    enabled: boolean;
+    mode: "lossless" | "balanced" | "aggressive";
+    exclude: string[];
+    json_max_array_items: number;
+    compressors: {
+      json: boolean;
+      log: boolean;
+    };
+    retention: {
+      enabled: boolean;
+      min_original_tokens: number;
+      ttl_days: number;
+    };
+  };
 }

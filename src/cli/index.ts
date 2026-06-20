@@ -10,7 +10,12 @@ import { startCachelaneStdioServer } from "../server/index.js";
 import { startProxy } from "../proxy/server.js";
 import {
   addExcludePattern,
+  addCompressionExcludePattern,
+  setCompressionCompressorEnabled,
   addPinPattern,
+  setCompressionEnabled,
+  setCompressionMode,
+  setCompressionRetentionEnabled,
   setKeepalivePolicy,
   setPrunerEnabled,
   setPrunerMode,
@@ -481,6 +486,109 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     });
 
   program
+    .command("exclude-compression")
+    .description("Exclude a tool output glob from compression")
+    .argument("<pattern>", "tool_use_id or glob")
+    .action((pattern: string) => {
+      printConfig(io, addCompressionExcludePattern(cachelaneConfigPath(env), pattern));
+    });
+
+  program
+    .command("compression-mode")
+    .description("Set tool output compression mode")
+    .argument("<mode>", "lossless, balanced, or aggressive")
+    .action((mode: string) => {
+      if (!["lossless", "balanced", "aggressive"].includes(mode)) {
+        throw new Error(`Invalid compression mode: ${mode}`);
+      }
+      printConfig(
+        io,
+        setCompressionMode(
+          cachelaneConfigPath(env),
+          mode as "lossless" | "balanced" | "aggressive",
+        ),
+      );
+    });
+
+  program
+    .command("compression-retention")
+    .description("Enable or disable original-output retention")
+    .argument("<state>", "enable or disable")
+    .action((state: string) => {
+      if (!["enable", "disable"].includes(state)) {
+        throw new Error(`Invalid compression retention state: ${state}`);
+      }
+      printConfig(
+        io,
+        setCompressionRetentionEnabled(cachelaneConfigPath(env), state === "enable"),
+      );
+    });
+
+  program
+    .command("compression-compressor")
+    .description("Enable or disable a specific tool output compressor")
+    .argument("<compressor>", "json or log")
+    .argument("<state>", "enable or disable")
+    .action((compressor: string, state: string) => {
+      if (!["json", "log"].includes(compressor)) {
+        throw new Error(`Invalid compression compressor: ${compressor}`);
+      }
+      if (!["enable", "disable"].includes(state)) {
+        throw new Error(`Invalid compression compressor state: ${state}`);
+      }
+      printConfig(
+        io,
+        setCompressionCompressorEnabled(
+          cachelaneConfigPath(env),
+          compressor as "json" | "log",
+          state === "enable",
+        ),
+      );
+    });
+
+  program
+    .command("enable-compression-retention")
+    .description("Enable original-output retention for retrievable compression")
+    .action(() => {
+      printConfig(io, setCompressionRetentionEnabled(cachelaneConfigPath(env), true));
+    });
+
+  program
+    .command("disable-compression-retention")
+    .description("Disable original-output retention")
+    .action(() => {
+      printConfig(io, setCompressionRetentionEnabled(cachelaneConfigPath(env), false));
+    });
+
+  program
+    .command("enable-json-compression")
+    .description("Enable JSON tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionCompressorEnabled(cachelaneConfigPath(env), "json", true));
+    });
+
+  program
+    .command("disable-json-compression")
+    .description("Disable JSON tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionCompressorEnabled(cachelaneConfigPath(env), "json", false));
+    });
+
+  program
+    .command("enable-log-compression")
+    .description("Enable log tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionCompressorEnabled(cachelaneConfigPath(env), "log", true));
+    });
+
+  program
+    .command("disable-log-compression")
+    .description("Disable log tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionCompressorEnabled(cachelaneConfigPath(env), "log", false));
+    });
+
+  program
     .command("enable")
     .description("Enable CacheLane pruning")
     .action(() => {
@@ -492,6 +600,20 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .description("Disable CacheLane pruning")
     .action(() => {
       printConfig(io, setPrunerEnabled(cachelaneConfigPath(env), false));
+    });
+
+  program
+    .command("disable-compression")
+    .description("Disable tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionEnabled(cachelaneConfigPath(env), false));
+    });
+
+  program
+    .command("enable-compression")
+    .description("Enable tool output compression")
+    .action(() => {
+      printConfig(io, setCompressionEnabled(cachelaneConfigPath(env), true));
     });
 
   program

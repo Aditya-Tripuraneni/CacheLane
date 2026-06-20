@@ -227,6 +227,96 @@ describe("cachelane CLI", () => {
     expect(raw.top_level_custom).toBe(true);
   });
 
+  it("compression commands update the compression section without touching other fields", async () => {
+    const configPath = path.join(env.CACHELANE_HOME!, "config.json");
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(
+      configPath,
+      JSON.stringify(
+        {
+          version: 1,
+          pruner: { enabled: true, k: 3, mode: "default" },
+          keepalive: {
+            policy: "auto",
+            interval_seconds: 150,
+            idle_threshold_seconds: 240,
+            large_prefix_threshold_tokens: 50000,
+          },
+          classification: { pin: ["keep-me"], exclude: [], sliding_window_turns: 4 },
+          telemetry: { opt_in: false, endpoint: "" },
+          compression: {
+            enabled: true,
+            mode: "aggressive",
+            exclude: ["*.log"],
+            json_max_array_items: 20,
+            compressors: { json: true, log: true },
+            retention: { enabled: false, min_original_tokens: 1000, ttl_days: 7 },
+          },
+          features: { auto_proxy: true, k_pruner: true, keepalive: true, mutation_enabled: true },
+        },
+        null,
+        2,
+      ),
+    );
+
+    await run(["exclude-compression", "*.json"]);
+    await run(["exclude-compression", "*.json"]);
+    await run(["compression-mode", "lossless"]);
+    await run(["compression-retention", "enable"]);
+    await run(["compression-compressor", "json", "disable"]);
+    await run(["disable-log-compression"]);
+    await run(["disable-compression"]);
+    let raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as {
+      compression: {
+        enabled: boolean;
+        mode: string;
+        exclude: string[];
+        compressors: { json: boolean; log: boolean };
+        retention: { enabled: boolean };
+      };
+      classification: { pin: string[] };
+    };
+    expect(raw.compression.enabled).toBe(false);
+    expect(raw.compression.mode).toBe("lossless");
+    expect(raw.compression.retention.enabled).toBe(true);
+    expect(raw.compression.compressors).toEqual({ json: false, log: false });
+    expect(raw.compression.exclude).toEqual(["*.log", "*.json"]);
+    expect(raw.classification.pin).toEqual(["keep-me"]);
+
+    await run(["enable-compression"]);
+    await run(["enable-json-compression"]);
+    await run(["compression-compressor", "log", "enable"]);
+    raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as {
+      compression: {
+        enabled: boolean;
+        mode: string;
+        exclude: string[];
+        compressors: { json: boolean; log: boolean };
+        retention: { enabled: boolean };
+      };
+      classification: { pin: string[] };
+    };
+    expect(raw.compression.enabled).toBe(true);
+    expect(raw.compression.mode).toBe("lossless");
+    expect(raw.compression.retention.enabled).toBe(true);
+    expect(raw.compression.compressors).toEqual({ json: true, log: true });
+    expect(raw.compression.exclude).toEqual(["*.log", "*.json"]);
+
+    await run(["compression-retention", "disable"]);
+    const retentionRaw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as {
+      compression: { retention: { enabled: boolean } };
+      classification: { pin: string[] };
+    };
+    expect(retentionRaw.compression.retention.enabled).toBe(false);
+  });
+
+  it("rejects invalid compression command values", async () => {
+    await expect(runFailure(["compression-mode", "unsafe"])).resolves.toContain("Invalid compression mode");
+    await expect(runFailure(["compression-retention", "maybe"])).resolves.toContain("Invalid compression retention state");
+    await expect(runFailure(["compression-compressor", "csv", "enable"])).resolves.toContain("Invalid compression compressor");
+    await expect(runFailure(["compression-compressor", "json", "maybe"])).resolves.toContain("Invalid compression compressor state");
+  });
+
   it("stats --json returns stable scoped output", async () => {
     const db = openDatabase(path.join(env.CACHELANE_HOME!, "cachelane.db"));
     db.insertTurn({

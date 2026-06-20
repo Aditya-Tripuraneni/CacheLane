@@ -68,6 +68,82 @@ describe("loadConfig", () => {
     expect(config.logging.level).toBe("debug");
   });
 
+  it("loads old configs without compression by applying compression defaults", () => {
+    const configPath = path.join(tmpDir, "config.json");
+    const oldConfig: Partial<CachelaneConfig> = {
+      version: 1,
+      pruner: { enabled: true, k: 5, mode: "conservative" },
+      keepalive: {
+        policy: "static",
+        interval_seconds: 120,
+        idle_threshold_seconds: 300,
+        large_prefix_threshold_tokens: 60000,
+      },
+      classification: { pin: [], exclude: [], sliding_window_turns: 6 },
+      telemetry: { opt_in: false, endpoint: "" },
+      proxy: {
+        port: 8123,
+        host: "127.0.0.1",
+        drain_timeout_ms: 250,
+        upstream_host: "localhost",
+        upstream_port: 8787,
+        upstream_ssl: false,
+        upstream_path_prefix: "/anthropic",
+      },
+    };
+    fs.writeFileSync(configPath, JSON.stringify(oldConfig));
+
+    const config = loadConfig(configPath);
+    expect(config.pruner.k).toBe(5);
+    expect(config.proxy.upstream_host).toBe("localhost");
+    expect(config.proxy.upstream_path_prefix).toBe("/anthropic");
+    expect(config.compression.enabled).toBe(true);
+    expect(config.compression.mode).toBe("lossless");
+    expect(config.compression.compressors).toEqual({ json: true, log: true });
+    expect(config.compression.retention.enabled).toBe(false);
+  });
+
+  it("fills partial compression config without discarding user settings", () => {
+    const configPath = path.join(tmpDir, "config.json");
+    const partialConfig: Record<string, unknown> = {
+      version: 1,
+      pruner: { enabled: true, k: 4, mode: "default" },
+      keepalive: {
+        policy: "auto",
+        interval_seconds: 150,
+        idle_threshold_seconds: 240,
+        large_prefix_threshold_tokens: 50000,
+      },
+      classification: { pin: ["src/**"], exclude: [], sliding_window_turns: 4 },
+      telemetry: { opt_in: false, endpoint: "" },
+      proxy: {
+        port: 7332,
+        host: "127.0.0.1",
+        drain_timeout_ms: 200,
+        upstream_host: "proxy.internal",
+        upstream_port: 9000,
+        upstream_ssl: false,
+        upstream_path_prefix: "",
+      },
+      compression: { enabled: false },
+    };
+    fs.writeFileSync(configPath, JSON.stringify(partialConfig));
+
+    const config = loadConfig(configPath);
+    expect(config.compression.enabled).toBe(false);
+    expect(config.compression.mode).toBe("lossless");
+    expect(config.compression.exclude).toEqual([]);
+    expect(config.compression.json_max_array_items).toBe(20);
+    expect(config.compression.compressors).toEqual({ json: true, log: true });
+    expect(config.compression.retention).toEqual({
+      enabled: false,
+      min_original_tokens: 1000,
+      ttl_days: 7,
+    });
+    expect(config.proxy.upstream_host).toBe("proxy.internal");
+    expect(config.classification.pin).toEqual(["src/**"]);
+  });
+
   it("throws when config schema version is newer than supported", () => {
     const configPath = path.join(tmpDir, "config.json");
     fs.writeFileSync(

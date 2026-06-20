@@ -77,6 +77,50 @@ export function setMutationEnabled(configPath: string, enabled: boolean): Cachel
   });
 }
 
+export function setCompressionEnabled(configPath: string, enabled: boolean): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    ensureSection(raw, "compression").enabled = enabled;
+  });
+}
+
+export function setCompressionMode(
+  configPath: string,
+  mode: CachelaneConfig["compression"]["mode"],
+): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    ensureSection(raw, "compression").mode = mode;
+  });
+}
+
+export function setCompressionRetentionEnabled(
+  configPath: string,
+  enabled: boolean,
+): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    const compression = ensureSection(raw, "compression");
+    const current = isObject(compression.retention)
+      ? compression.retention
+      : { ...DEFAULT_CONFIG.compression.retention };
+    current.enabled = enabled;
+    compression.retention = current;
+  });
+}
+
+export function setCompressionCompressorEnabled(
+  configPath: string,
+  compressor: "json" | "log",
+  enabled: boolean,
+): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    const compression = ensureSection(raw, "compression");
+    const current = isObject(compression.compressors)
+      ? compression.compressors
+      : { ...DEFAULT_CONFIG.compression.compressors };
+    current[compressor] = enabled;
+    compression.compressors = current;
+  });
+}
+
 export function setPrunerMode(
   configPath: string,
   mode: CachelaneConfig["pruner"]["mode"],
@@ -125,6 +169,17 @@ export function addPinPattern(configPath: string, pattern: string): CachelaneCon
 
 export function addExcludePattern(configPath: string, pattern: string): CachelaneConfig {
   return addUniquePattern(configPath, "exclude", pattern);
+}
+
+export function addCompressionExcludePattern(configPath: string, pattern: string): CachelaneConfig {
+  return updateConfig(configPath, (raw) => {
+    const compression = ensureSection(raw, "compression");
+    const existing = Array.isArray(compression.exclude)
+      ? compression.exclude.filter((value): value is string => typeof value === "string")
+      : [];
+    if (!existing.includes(pattern)) existing.push(pattern);
+    compression.exclude = existing;
+  });
 }
 
 export function setTelemetryOptIn(configPath: string, optIn: boolean): CachelaneConfig {

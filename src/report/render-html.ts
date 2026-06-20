@@ -56,13 +56,14 @@ export function renderReportHtml(data: ReportData, benchmark?: RecordedBenchmark
     .join("") || `<tr><td colspan="4">No sessions yet</td></tr>`;
 
   const usageHtml = `
-<div class="cards">
+  <div class="cards">
   ${card("Savings", pct(data.stats.savings_ratio))}
   ${card("Cache hit ratio", pct(data.stats.cache_hit_ratio))}
   ${card("Turns", String(data.stats.turns))}
   ${card("Effective units", data.stats.effective_cost_units.toFixed(0))}
   ${card("Baseline units", data.stats.baseline_cost_units.toFixed(0))}
   ${card("Pruned blocks", String(data.stats.pruner_counts.pruned_blocks))}
+  ${card("Est. compression saved", String(data.stats.compression_counts.tokens_saved))}
   ${card("Fail-open turns", String(data.stats.pipeline_fallback_turns), data.stats.pipeline_fallback_turns > 0)}
 </div>
 <table><thead><tr><th>Session</th><th>Turns</th><th>Hit</th><th>Savings</th></tr></thead><tbody>${sessionRows}</tbody></table>`;
@@ -84,6 +85,6 @@ ${curve}
       { id: "decisions", label: "Decisions", html: decisionsHtml },
       ...(benchmark ? benchmarkTabs(benchmark) : []),
     ],
-    footerHtml: `<footer>Local report generated from ~/.cachelane/cachelane.db. No prompt text, file contents, or tool output are stored or shown — content_persisted: false.</footer>`,
+    footerHtml: `<footer>Local report generated from ~/.cachelane/cachelane.db. By default CacheLane stores metadata only. If compression retention is explicitly enabled, original tool outputs may be stored locally until expiry for MCP retrieval.</footer>`,
   });
 }

@@ -15,6 +15,7 @@ const data: ReportData = {
     savings_ratio: 0.573, pipeline_fallback_turns: 0,
     pruner_counts: { pruned_blocks: 0, turns_with_pruning: 0 },
     keepalive_counts: { pings: 0, turns_with_keepalive: 0 },
+    compression_counts: { compressed_blocks: 0, tokens_saved: 0 },
   },
   turns: [
     { turn_number: 1, model: "m", input_tokens: 100, cache_read_tokens: 0, cache_creation_tokens: 0,

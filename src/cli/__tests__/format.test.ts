@@ -22,7 +22,11 @@ describe("formatStats", () => {
       keepalive_counts: {
         pings: 5,
         turns_with_keepalive: 3,
-      }
+      },
+      compression_counts: {
+        compressed_blocks: 0,
+        tokens_saved: 0,
+      },
     };
 
     const output = formatStats(stats);
@@ -37,6 +41,7 @@ describe("formatStats", () => {
         "Savings ratio: 16.3%",
         "Pruned blocks: 4",
         "Keepalive pings: 5",
+        "Estimated compression tokens saved: 0",
       ].join("\n")
     );
   });

@@ -190,6 +190,29 @@ export interface CachelaneDb extends Database.Database {
   updateTurnExplanationUsage(turnId: string, usage: TurnExplanationUsage, updatedAt: number): void;
   getRecentTurnExplanations(params: GetRecentTurnExplanationsParams): TurnExplanationRecord[];
   getStats(params: GetStatsParams): CachelaneStats;
+  recordCompressionEvents(
+    turnId: string,
+    sessionId: string,
+    workspaceId: string,
+    events: Array<{
+      tool_use_id: string;
+      content_type: string;
+      original_tokens: number;
+      compressed_tokens: number;
+      tokens_saved: number;
+      compressor_id?: string;
+      mode?: string;
+      lossiness?: string;
+      outcome?: string;
+      latency_ms?: number;
+      token_model?: string;
+      retention_handle?: string;
+    }>
+  ): void;
+  recordCompressionOriginal(params: RecordCompressionOriginalParams): string;
+  deleteCompressionOriginal(handle: string): void;
+  deleteExpiredCompressionOriginals(nowMs: number): number;
+  getCompressionOriginal(params: GetCompressionOriginalParams): CompressionOriginalRow | null;
 }
 
 export interface TurnExplanationUsage {
@@ -302,6 +325,51 @@ export interface GetStatsParams {
   since_ms?: number;
 }
 
+export interface CompressionEventRow {
+  id: string;
+  turn_id: string;
+  session_id: string;
+  workspace_id: string;
+  tool_use_id: string;
+  content_type: string;
+  original_tokens: number;
+  compressed_tokens: number;
+  tokens_saved: number;
+  created_at: number;
+}
+
+export interface CompressionOriginalRow {
+  handle: string;
+  turn_id: string;
+  session_id: string;
+  workspace_id: string;
+  tool_use_id: string;
+  content_sha256: string;
+  original_text: string;
+  original_tokens: number;
+  created_at: number;
+  expires_at: number | null;
+}
+
+export interface RecordCompressionOriginalParams {
+  turn_id: string;
+  session_id: string;
+  workspace_id: string;
+  tool_use_id: string;
+  content_sha256: string;
+  original_text: string;
+  original_tokens: number;
+  created_at: number;
+  expires_at: number | null;
+}
+
+export interface GetCompressionOriginalParams {
+  handle: string;
+  workspace_id: string;
+  session_id: string;
+  now_ms?: number;
+}
+
 export interface CachelaneStats {
   scope: StatsScope;
   workspace_id: string | null;
@@ -320,6 +388,10 @@ export interface CachelaneStats {
   keepalive_counts: {
     pings: number;
     turns_with_keepalive: number;
+  };
+  compression_counts: {
+    compressed_blocks: number;
+    tokens_saved: number;
   };
 }
 

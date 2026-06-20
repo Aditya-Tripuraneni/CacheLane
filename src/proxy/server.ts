@@ -5,6 +5,7 @@ import { loadConfig, defaultWorkspaceId } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
 import { handlePreRequest } from "../hooks/pre-request.js";
 import { classifyBlock } from "../classifier/index.js";
+import { compress } from "../compressor/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
 import { logger } from "../logger/index.js";
 import { eventStreamToSSE, isEventStreamContentType } from "./eventstream.js";
@@ -392,9 +393,32 @@ export function createProxyServer(
         });
 
         const config = loadConfig(opts.config_path ?? defaultConfigPath());
+        const compressionEnabled = config.features.mutation_enabled && config.compression.enabled;
+        const compressionResult = compressionEnabled
+          ? compress(parsed.messages, config.compression, {
+            now_ms: Date.now(),
+            retainOriginal: (record) => db.recordCompressionOriginal({
+              turn_id: turnId,
+              session_id: sessionId,
+              workspace_id: workspaceId,
+              tool_use_id: record.tool_use_id,
+              content_sha256: createHash("sha256").update(record.original_text).digest("hex"),
+              original_text: record.original_text,
+              original_tokens: record.original_tokens,
+              created_at: record.created_at,
+              expires_at: record.expires_at,
+            }),
+            discardOriginal: (handle) => db.deleteCompressionOriginal(handle),
+          })
+          : { messages: parsed.messages, events: [] };
+        const compressionMutated = compressionResult.messages.some(
+          (msg, index) => msg !== parsed.messages[index],
+        );
+        const requestForPipeline =
+          compressionMutated ? { ...parsed, messages: compressionResult.messages } : parsed;
 
         const messageClassifications = classifyAllMessages(
-          parsed.messages,
+          requestForPipeline.messages,
           currentTurn,
           config,
         );
@@ -406,16 +430,31 @@ export function createProxyServer(
           session_id: sessionId,
           turn_id: turnId,
           current_turn: currentTurn,
-          original_request: parsed,
+          original_request: requestForPipeline,
           message_classifications: messageClassifications,
-          block_placements: computeBlockPlacements(parsed.messages, db.getBlocksBySession(workspaceId, sessionId)),
+          block_placements: computeBlockPlacements(
+            requestForPipeline.messages,
+            db.getBlocksBySession(workspaceId, sessionId),
+          ),
           pruner: config.pruner,
         });
 
-        const actuallyMutate = config.features.mutation_enabled && result.mutated;
+        const actuallyMutate = config.features.mutation_enabled && (compressionMutated || result.mutated);
         const forwardBody = actuallyMutate
           ? Buffer.from(JSON.stringify(result.request), "utf-8")
           : body;
+
+        if (compressionResult.events.length > 0 && actuallyMutate) {
+          try {
+            db.recordCompressionEvents(turnId, sessionId, workspaceId, compressionResult.events);
+          } catch (err) {
+            logger.error(
+              "failed to record compression events",
+              err instanceof Error ? err.message : String(err),
+              err,
+            );
+          }
+        }
 
         const finalSignals = [...result.signals];
         if (!config.features.mutation_enabled) {

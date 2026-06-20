@@ -169,19 +169,20 @@ Claude Code sends:   [ ...history... ][ 5,000-token file ][ new msg ]
 Anthropic receives:  [ ...history... ][ stub: id + summary + expand() ][ new msg ]
 ```
 
-This is **lossless, and nothing is ever stored.** CacheLane does not keep your content. Claude Code still holds the original and re-sends it every turn; CacheLane just masks it in the copy forwarded to Anthropic. If the model needs it back, it calls the `cachelane_expand` MCP tool, CacheLane flips that block from "stub" to "live", and the real content flows through again on the next turn. (Expanding is far cheaper than re-reading the file from scratch: the call carries just a block id, and it re-uses the existing cache entry instead of paying a fresh `1×` read **plus** a `1.25×` cache write for newly-read content.)
+K-pruning is **lossless and metadata-only**. Claude Code still holds the original and re-sends it every turn; CacheLane just masks it in the copy forwarded to Anthropic. If the model needs it back, it calls the `cachelane_expand` MCP tool, CacheLane flips that block from "stub" to "live", and the real content flows through again on the next turn. (Expanding is far cheaper than re-reading the file from scratch: the call carries just a block id, and it re-uses the existing cache entry instead of paying a fresh `1×` read **plus** a `1.25×` cache write for newly-read content.)
 
 ### 7. Why there's a database
 
-Placing breakpoints on one request needs no memory, but pruning and restoring are stateful across turns. So CacheLane keeps a local SQLite database (`~/.cachelane/cachelane.db`) holding **only metadata**:
+Placing breakpoints on one request needs no memory, but pruning and restoring are stateful across turns. So CacheLane keeps a local SQLite database (`~/.cachelane/cachelane.db`) holding metadata:
 
 - **Idle counters:** "this block has been untouched for 3 turns" is impossible to know without history.
 - **Stub state and refetch handles:** which blocks are currently masked, and how `cachelane_expand` puts them back.
 - **Prefix hashes:** to confirm the stable region really stayed byte-identical (so the cache will hit) and to detect drift.
 - **Keepalive state:** which sessions are idle and how big their prefix is.
 - **Stats:** token counts, hit ratios, and savings that power `cachelane stats`, `sessions`, and `explain`.
+- **Optional retained originals:** only when `compression.retention.enabled` is explicitly enabled, CacheLane may store original tool outputs locally so Claude can retrieve them through `cachelane_retrieve_tool_output`.
 
-It never stores your prompts, code, or secrets, only hashes, counts, and short summaries.
+By default CacheLane does not store prompts, code, or tool-output bodies. Enabling compression retention changes that privacy posture for tool outputs only; retained originals are scoped to the local workspace/session and expire according to `compression.retention.ttl_days`.
 
 ### 8. Keeping the cache warm (keepalive)
 
@@ -206,7 +207,7 @@ So a single auto-launched process owns everything. That's why you never start an
 For each turn the proxy:
 
 1. Intercepts the outgoing request from Claude Code.
-2. Runs the pipeline (**classify → prune → place `cache_control` breakpoints**).
+2. Runs the pipeline (**compress tool outputs → classify → prune → place `cache_control` breakpoints**) — measured at **< 35 ms p95** per turn, with compression benchmarked separately.
 3. Forwards the optimized request to `api.anthropic.com` and streams the response straight back.
 4. Logs metadata (hashes, token counts, hit ratios) to local SQLite.
 
@@ -256,6 +257,11 @@ Sessions are keyed by Claude Code's own session id, so the value in the `cachela
 | `cachelane pin <file\|glob>` | Pin files into the `STABLE` region so they're never pruned. |
 | `cachelane exclude <file\|glob>` | Exclude files from cache-aware classification. |
 | `cachelane enable` / `cachelane disable` | Toggle pruning without uninstalling. |
+| `cachelane enable-compression` / `cachelane disable-compression` | Toggle tool-output compression globally. |
+| `cachelane compression-mode lossless\|balanced\|aggressive` | Set compression mode. `lossless` is the default; `balanced` and `aggressive` are lossy. |
+| `cachelane exclude-compression <tool_use_id\|glob>` | Exclude matching tool outputs from compression. |
+| `cachelane compression-compressor json\|log enable\|disable` | Toggle a specific compressor while leaving the rest enabled. |
+| `cachelane compression-retention enable\|disable` | Toggle local original-output retention for retrievable lossy compression. Disabled by default. |
 
 ### Internal / advanced
 
@@ -276,6 +282,7 @@ When the server is running, Claude can call:
 - `cachelane_stats`: session/workspace cache and savings aggregates.
 - `cachelane_explain`: structured explanation of region breakpoints and prune decisions.
 - `cachelane_expand`: restore a pruned stub's full content into the next turn.
+- `cachelane_retrieve_tool_output`: retrieve a locally retained original tool output by handle when compression retention is enabled.
 - `cachelane_health`: health status and degraded-fallback metrics.
 
 ---
@@ -291,6 +298,8 @@ Settings live in `~/.cachelane/config.json` and can be edited via the tuning com
 | Proxy | `127.0.0.1:7332`, upstream `api.anthropic.com:443` |
 | Auto-proxy | on (MCP server starts the proxy in-process) |
 | Telemetry | **off** (opt-in only) |
+| Compression | enabled, mode `lossless`, JSON/log compressors enabled |
+| Compression retention | **off** (opt-in local storage of original tool outputs) |
 
 ---
 
@@ -333,7 +342,7 @@ All state is local:
 | Path | Contents |
 |------|----------|
 | `~/.cachelane/config.json` | Configuration |
-| `~/.cachelane/cachelane.db` | SQLite log: block hashes, token counts, hit stats (**never** prompt text) |
+| `~/.cachelane/cachelane.db` | SQLite log: block hashes, token counts, hit stats, and optional retained tool-output originals when compression retention is enabled |
 | `~/.cachelane/cachelane.log` | Rotating log (10 MB × 5 files) |
 | `~/.claude.json` | MCP server registration (`mcpServers.cachelane`) |
 | `~/.claude/settings.json` | `ANTHROPIC_BASE_URL` redirect + hook entries |
@@ -344,7 +353,7 @@ All state is local:
 ## Security & privacy (100% local-first)
 
 - **No SaaS backend.** No prompt text, responses, or file contents leave your machine except directly to `api.anthropic.com` over TLS.
-- **Metadata-only SQLite.** The database stores block hashes, token counts, and hit statistics, never prompt bodies, secrets, or file contents.
+- **Metadata-only by default.** The database stores block hashes, token counts, and hit statistics. If compression retention is explicitly enabled, it can also store original tool outputs locally until expiry for retrieval.
 - **Opt-in telemetry.** Disabled by default. If enabled, it reports only high-level aggregates (cache ratios, savings) and strips paths, prompt text, workspace IDs, and keys.
 
 ---

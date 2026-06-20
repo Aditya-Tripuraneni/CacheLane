@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,8 +9,10 @@ import {
   explainInputSchema,
   handleExpandTool,
   handleExplainTool,
+  handleRetrieveToolOutputTool,
   handleStatsTool,
   jsonTextPayload,
+  retrieveToolOutputInputSchema,
   statsInputSchema,
   type CachelaneMcpContext,
 } from "../tools.js";
@@ -72,6 +75,10 @@ function insertBlock(id: string, overrides: Partial<Parameters<typeof db.insertB
   });
 }
 
+function sha256(text: string): string {
+  return crypto.createHash("sha256").update(text).digest("hex");
+}
+
 function insertExplanation(
   id: string,
   turnNumber: number,
@@ -124,6 +131,10 @@ describe("MCP tool schemas", () => {
 
   it("rejects missing expand block_id", () => {
     expect(expandInputSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejects missing retrieve handle", () => {
+    expect(retrieveToolOutputInputSchema.safeParse({}).success).toBe(false);
   });
 });
 
@@ -221,6 +232,44 @@ describe("MCP tool handlers", () => {
       ok: false,
       error: { code: "not_stub" },
     });
+  });
+
+  it("retrieves retained compression original by handle", () => {
+    const original = '{"a":null,"b":[1,2,3]}';
+    const handle = db.recordCompressionOriginal({
+      turn_id: "turn-1",
+      workspace_id: "ws-1",
+      session_id: "sess-1",
+      tool_use_id: "tool-1",
+      content_sha256: sha256(original),
+      original_text: original,
+      original_tokens: 10,
+      created_at: 1_715_000_000_000,
+      expires_at: null,
+    });
+
+    expect(handleRetrieveToolOutputTool(context(), { handle })).toEqual({
+      found: true,
+      tool_use_id: "tool-1",
+      original_text: original,
+      original_tokens: 10,
+    });
+  });
+
+  it("retrieve returns not found for wrong session or expired handle", () => {
+    const handle = db.recordCompressionOriginal({
+      turn_id: "turn-1",
+      workspace_id: "ws-1",
+      session_id: "sess-other",
+      tool_use_id: "tool-1",
+      content_sha256: sha256("secret"),
+      original_text: "secret",
+      original_tokens: 2,
+      created_at: 1_715_000_000_000,
+      expires_at: 1_715_000_000_001,
+    });
+
+    expect(handleRetrieveToolOutputTool(context(), { handle })).toEqual({ found: false });
   });
 
   it("json payloads never include known prompt or tool fixture content", () => {
