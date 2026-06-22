@@ -2,7 +2,6 @@ import type {
   TurnExplanationUsage,
   TurnExplanationBlockMetadata,
   RegionCostBreakdown,
-  RegionCost,
   TokenTier
 } from "../storage/types.js";
 
@@ -43,7 +42,7 @@ export function reconcileTurnCost(
     semiTier = "cache_creation_5m";
   }
 
-  const volatileTier: TokenTier = "input";
+
 
   // Distribute exact API tokens based on the identified tiers
   // 1. Distribute cache_read tokens
@@ -71,7 +70,7 @@ export function reconcileTurnCost(
   let remainingCreate5m = usage.cache_creation_5m_tokens;
   let remainingCreate1h = usage.cache_creation_1h_tokens;
   let stableCreate5m = 0, stableCreate1h = 0;
-  let semiCreate5m = 0, semiCreate1h = 0;
+  let semiCreate5m = 0;
 
   if (stableTier.startsWith("cache_creation")) {
     stableCreate1h = remainingCreate1h;
