@@ -298,6 +298,7 @@ describe("openDatabase", () => {
           volatility: "VOLATILE",
           is_pinned: false,
           has_refetch_handle: true,
+          token_count: 100,
         },
       ],
       region_metadata: {

@@ -14,8 +14,8 @@ describe("reconcileTurnCost", () => {
     };
     
     const blockMetadata: TurnExplanationBlockMetadata[] = [
-      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
-      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
+      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
+      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
     ];
 
     const current = { prefix_breakpoint_hash: "hash1", middle_breakpoint_hash: "hash2" };
@@ -41,8 +41,8 @@ describe("reconcileTurnCost", () => {
     };
     
     const blockMetadata: TurnExplanationBlockMetadata[] = [
-      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
-      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
+      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
+      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
     ];
 
     const current = { prefix_breakpoint_hash: "hash1", middle_breakpoint_hash: "hash2" };
@@ -69,7 +69,7 @@ describe("reconcileTurnCost", () => {
     };
     
     const blockMetadata: TurnExplanationBlockMetadata[] = [
-      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
+      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
     ];
 
     const current = { prefix_breakpoint_hash: "hash1", middle_breakpoint_hash: "hash3" };
@@ -96,8 +96,8 @@ describe("reconcileTurnCost", () => {
     };
     
     const blockMetadata: TurnExplanationBlockMetadata[] = [
-      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
-      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "text", is_pinned: false, has_refetch_handle: false },
+      { block_id: "1", volatility: "STABLE", token_count: 1000, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
+      { block_id: "2", volatility: "SEMI", token_count: 500, message_index: 0, content_index: 0, kind: "tool_output", is_pinned: false, has_refetch_handle: false },
     ];
 
     const current = { prefix_breakpoint_hash: "hash1", middle_breakpoint_hash: null };
