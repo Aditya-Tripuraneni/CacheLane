@@ -169,9 +169,10 @@ export interface CachelaneDb extends Database.Database {
     id: string,
     refetchHandle: string,
     stubSummary: string | null,
+    tokenCount: number,
     updatedAt: number
   ): void;
-  markStubs(items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; updatedAt: number }>): void;
+  markStubs(items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; tokenCount: number; updatedAt: number }>): void;
   restoreStub(params: RestoreStubParams): void;
   allocateTurnNumber(params: AllocateTurnNumberParams): number;
   insertTurn(params: InsertTurnParams): void;
@@ -187,7 +188,7 @@ export interface CachelaneDb extends Database.Database {
   updateTurnUsage(params: UpdateTurnUsageParams): void;
   insertTurnExplanation(params: InsertTurnExplanationParams): void;
   getTurnExplanation(params?: GetTurnExplanationParams): TurnExplanationRecord | null;
-  updateTurnExplanationUsage(turnId: string, usage: TurnExplanationUsage, updatedAt: number): void;
+  updateTurnExplanationUsage(turnId: string, usage: TurnExplanationUsage, regionCost: RegionCostBreakdown | null, updatedAt: number): void;
   getRecentTurnExplanations(params: GetRecentTurnExplanationsParams): TurnExplanationRecord[];
   getStats(params: GetStatsParams): CachelaneStats;
   recordCompressionEvents(
@@ -243,6 +244,7 @@ export interface TurnExplanationBlockMetadata {
   is_stub?: boolean;
   has_refetch_handle: boolean;
   restored_at_turn?: number | null;
+  token_count: number;
 }
 
 export interface TurnExplanationRegionMetadata {
@@ -250,6 +252,20 @@ export interface TurnExplanationRegionMetadata {
   stable_count: number;
   semi_count: number;
   volatile_count: number;
+}
+
+export type TokenTier = "input" | "cache_read" | "cache_creation" | "cache_creation_5m" | "cache_creation_1h";
+
+export interface RegionCost {
+  tokens: number;
+  tier: TokenTier;
+  cost_units: number;
+}
+
+export interface RegionCostBreakdown {
+  stable: RegionCost;
+  semi: RegionCost;
+  volatile: RegionCost;
 }
 
 export interface InsertTurnExplanationParams {
@@ -265,6 +281,7 @@ export interface InsertTurnExplanationParams {
   prune_decisions: TurnExplanationPruneDecision[];
   block_metadata: TurnExplanationBlockMetadata[];
   region_metadata: TurnExplanationRegionMetadata;
+  region_cost?: RegionCostBreakdown;
   signals: string[];
   usage?: Partial<TurnExplanationUsage>;
   created_at: number;
@@ -285,6 +302,7 @@ export interface TurnExplanationRow {
   prune_decisions_json: string;
   block_metadata_json: string;
   region_metadata_json: string;
+  region_cost_json: string | null;
   signals_json: string;
   usage_input_tokens: number;
   usage_output_tokens: number;
@@ -310,6 +328,7 @@ export interface TurnExplanationRecord {
   prune_decisions: TurnExplanationPruneDecision[];
   block_metadata: TurnExplanationBlockMetadata[];
   region_metadata: TurnExplanationRegionMetadata;
+  region_cost: RegionCostBreakdown | null;
   signals: string[];
   usage: TurnExplanationUsage;
   created_at: number;

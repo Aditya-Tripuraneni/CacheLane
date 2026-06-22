@@ -1,6 +1,7 @@
 import type { CachelaneDb } from "../storage/index.js";
 import type { PruneDecision, PruneExpiredBlocksParams, PruneResult } from "./types.js";
-import { makeStubSummary } from "./stubs.js";
+import { makeStubSummary, formatStubText } from "./stubs.js";
+import { countTokens } from "../tokenizer/index.js";
 
 export function pruneExpiredBlocks(
   db: CachelaneDb,
@@ -28,29 +29,35 @@ export function pruneExpiredBlocks(
     if (refetchHandle === null) {
       throw new Error(`Prunable block ${row.id} is missing refetch_handle`);
     }
-    return { row, refetchHandle, stubSummary: makeStubSummary(row) };
+    const stubSummary = makeStubSummary(row);
+    const decision: PruneDecision = {
+      block_id: row.id,
+      action: "stubbed",
+      reason: `unused_turns >= ${params.k}`,
+      stub_summary: stubSummary,
+      refetch_handle: refetchHandle,
+      kind: row.kind,
+    };
+    const stubText = formatStubText(decision);
+    const tokenCount = countTokens(stubText, "claude-3"); // Fallback multiplier is fine for stubs
+    
+    return { row, refetchHandle, stubSummary, tokenCount, decision };
   });
 
   // Write all stubs atomically — either all succeed or none are written
   db.markStubs(
-    stubItems.map(({ row, refetchHandle, stubSummary }) => ({
+    stubItems.map(({ row, refetchHandle, stubSummary, tokenCount }) => ({
       id: row.id,
       workspace_id: params.workspace_id,
       session_id: params.session_id,
       refetchHandle,
       stubSummary,
+      tokenCount,
       updatedAt: nowMs,
     })),
   );
 
-  const decisions: PruneDecision[] = stubItems.map(({ row, refetchHandle, stubSummary }) => ({
-    block_id: row.id,
-    action: "stubbed" as const,
-    reason: `unused_turns >= ${params.k}`,
-    stub_summary: stubSummary,
-    refetch_handle: refetchHandle,
-    kind: row.kind,
-  }));
+  const decisions: PruneDecision[] = stubItems.map(({ decision }) => decision);
 
   if (decisions.length > 0) {
     console.info("[cachelane] pruner: stubbed blocks", {
