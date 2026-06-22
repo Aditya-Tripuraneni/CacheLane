@@ -29,6 +29,7 @@ import type {
   RecordCompressionOriginalParams,
   GetCompressionOriginalParams,
   CompressionOriginalRow,
+  RegionCostBreakdown,
 } from "./types.js";
 import { isCorruptionError, tryOpen } from "./recovery.js";
 import { ulid } from "ulid";
@@ -96,6 +97,7 @@ export function rowToTurnExplanation(
         volatile_count: 0,
       },
     ),
+    region_cost: row.region_cost_json ? parseJson<RegionCostBreakdown | null>(row.region_cost_json, null) : null,
     signals: parseJson<string[]>(row.signals_json, []),
     usage: {
       input_tokens: row.usage_input_tokens,
@@ -207,6 +209,12 @@ export function openDatabase(dbPath: string): CachelaneDb {
        @is_pinned, @token_count, @added_at_turn, @last_referenced_at_turn,
        @unused_turns, @is_stub, @stub_summary, @refetch_handle,
        @restored_at_turn, @created_at, @updated_at)
+    ON CONFLICT(id) DO UPDATE SET
+      content_hash = excluded.content_hash,
+      token_count = excluded.token_count,
+      is_stub = excluded.is_stub,
+      stub_summary = excluded.stub_summary,
+      updated_at = excluded.updated_at
   `);
 
   const getBlockStmt = rawDb.prepare("SELECT * FROM blocks WHERE id = ?");
@@ -224,7 +232,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
   );
 
   const markStubStmt = rawDb.prepare(
-    "UPDATE blocks SET is_stub = 1, refetch_handle = ?, stub_summary = ?, restored_at_turn = NULL, updated_at = ? WHERE id = ?"
+    "UPDATE blocks SET is_stub = 1, refetch_handle = ?, stub_summary = ?, token_count = ?, restored_at_turn = NULL, updated_at = ? WHERE id = ?"
   );
 
   const restoreStubStmt = rawDb.prepare(`
@@ -336,7 +344,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       (turn_id, workspace_id, session_id, turn_number, model,
        prefix_breakpoint_hash, middle_breakpoint_hash, mutated,
        pruned_blocks_count, prune_decisions_json, block_metadata_json,
-       region_metadata_json, signals_json,
+       region_metadata_json, region_cost_json, signals_json,
        usage_input_tokens, usage_output_tokens,
        usage_cache_creation_5m_tokens, usage_cache_creation_1h_tokens,
        usage_cache_read_tokens, usage_effective_cost_units,
@@ -345,7 +353,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       (@turn_id, @workspace_id, @session_id, @turn_number, @model,
        @prefix_breakpoint_hash, @middle_breakpoint_hash, @mutated,
        @pruned_blocks_count, @prune_decisions_json, @block_metadata_json,
-       @region_metadata_json, @signals_json,
+       @region_metadata_json, @region_cost_json, @signals_json,
        @usage_input_tokens, @usage_output_tokens,
        @usage_cache_creation_5m_tokens, @usage_cache_creation_1h_tokens,
        @usage_cache_read_tokens, @usage_effective_cost_units,
@@ -360,6 +368,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       prune_decisions_json = excluded.prune_decisions_json,
       block_metadata_json = excluded.block_metadata_json,
       region_metadata_json = excluded.region_metadata_json,
+      region_cost_json = excluded.region_cost_json,
       signals_json = excluded.signals_json,
       usage_input_tokens = excluded.usage_input_tokens,
       usage_output_tokens = excluded.usage_output_tokens,
@@ -378,6 +387,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
         usage_cache_creation_1h_tokens = @cache_creation_1h_tokens,
         usage_cache_read_tokens = @cache_read_tokens,
         usage_effective_cost_units = @effective_cost_units,
+        region_cost_json = @region_cost_json,
         updated_at = @updated_at
     WHERE turn_id = @turn_id
   `);
@@ -487,16 +497,17 @@ export function openDatabase(dbPath: string): CachelaneDb {
     id: string,
     refetchHandle: string,
     stubSummary: string | null,
+    tokenCount: number,
     updatedAt: number
-  ) => void markStubStmt.run(refetchHandle, stubSummary, updatedAt, id);
+  ) => void markStubStmt.run(refetchHandle, stubSummary, tokenCount, updatedAt, id);
 
   db.markStubs = rawDb.transaction(
-    (items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; updatedAt: number }>) => {
-      for (const { id, refetchHandle, stubSummary, updatedAt } of items) {
-        markStubStmt.run(refetchHandle, stubSummary, updatedAt, id);
+    (items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; tokenCount: number; updatedAt: number }>) => {
+      for (const { id, refetchHandle, stubSummary, tokenCount, updatedAt } of items) {
+        markStubStmt.run(refetchHandle, stubSummary, tokenCount, updatedAt, id);
       }
     },
-  ) as (items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; updatedAt: number }>) => void;
+  ) as (items: Array<{ id: string; workspace_id: string; session_id: string; refetchHandle: string; stubSummary: string | null; tokenCount: number; updatedAt: number }>) => void;
 
   db.restoreStub = (p: RestoreStubParams) => void restoreStubStmt.run(p);
 
@@ -612,6 +623,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       prune_decisions_json: stableJson(p.prune_decisions),
       block_metadata_json: stableJson(p.block_metadata),
       region_metadata_json: stableJson(p.region_metadata),
+      region_cost_json: p.region_cost ? stableJson(p.region_cost) : null,
       signals_json: stableJson(p.signals),
       usage_input_tokens: usage.input_tokens,
       usage_output_tokens: usage.output_tokens,
@@ -624,7 +636,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
     });
   };
 
-  db.updateTurnExplanationUsage = (turnId: string, usage: TurnExplanationUsage, updatedAt: number) => {
+  db.updateTurnExplanationUsage = (turnId: string, usage: TurnExplanationUsage, regionCost: RegionCostBreakdown | null, updatedAt: number) => {
     updateTurnExplanationUsageStmt.run({
       turn_id: turnId,
       input_tokens: usage.input_tokens,
@@ -633,6 +645,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       cache_creation_1h_tokens: usage.cache_creation_1h_tokens,
       cache_read_tokens: usage.cache_read_tokens,
       effective_cost_units: usage.effective_cost_units,
+      region_cost_json: regionCost ? stableJson(regionCost) : null,
       updated_at: updatedAt,
     });
   };

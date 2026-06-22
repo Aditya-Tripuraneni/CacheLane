@@ -99,6 +99,7 @@ function explainBlockMetadata(
     is_pinned: placement.is_pinned,
     has_refetch_handle: placement.refetch_handle !== null,
     restored_at_turn: placement.restored_at_turn ?? null,
+    token_count: placement.token_count,
   }));
 }
 
