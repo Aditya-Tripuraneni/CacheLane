@@ -1,5 +1,6 @@
 import { compressJson } from "./json-compress.js";
 import { compressLog } from "./log-compress.js";
+import { compressShell } from "./shell-compress.js";
 import type {
   CompressorInput,
   CompressorOutput,
@@ -48,6 +49,22 @@ function logDetection(input: CompressorInput): DetectionResult {
     : { matched: false, confidence: 0, content_type: "passthrough" };
 }
 
+export const shellCompressor: ToolOutputCompressor = {
+  id: "shell",
+  supportedModes: ["lossless", "balanced", "aggressive"],
+  detect: (input) =>
+    compressShell(input) !== null
+      ? { matched: true, confidence: 100, content_type: "shell" }
+      : { matched: false, confidence: 0, content_type: "passthrough" },
+  compress: (input) => {
+    const result = compressShell(input);
+    if (result === null) {
+      return { content: input.content, content_type: "passthrough", compressor_id: "passthrough", lossiness: "passthrough" };
+    }
+    return result.output;
+  },
+};
+
 export const jsonCompressor: ToolOutputCompressor = {
   id: "json",
   supportedModes: ["lossless", "balanced", "aggressive"],
@@ -88,7 +105,7 @@ export const passthroughCompressor: ToolOutputCompressor = {
 };
 
 export function createDefaultRegistry(): ToolOutputCompressor[] {
-  return [jsonCompressor, logCompressor, passthroughCompressor];
+  return [shellCompressor, jsonCompressor, logCompressor, passthroughCompressor];
 }
 
 export function routeCompression(

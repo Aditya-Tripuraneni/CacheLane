@@ -534,10 +534,10 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
   program
     .command("compression-compressor")
     .description("Enable or disable a specific tool output compressor")
-    .argument("<compressor>", "json or log")
+    .argument("<compressor>", "json, log, or shell")
     .argument("<state>", "enable or disable")
     .action((compressor: string, state: string) => {
-      if (!["json", "log"].includes(compressor)) {
+      if (!["json", "log", "shell"].includes(compressor)) {
         throw new Error(`Invalid compression compressor: ${compressor}`);
       }
       if (!["enable", "disable"].includes(state)) {
@@ -547,7 +547,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
         io,
         setCompressionCompressorEnabled(
           cachelaneConfigPath(env),
-          compressor as "json" | "log",
+          compressor as "json" | "log" | "shell",
           state === "enable",
         ),
       );

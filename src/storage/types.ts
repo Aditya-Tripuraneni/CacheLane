@@ -208,6 +208,7 @@ export interface CachelaneDb extends Database.Database {
       latency_ms?: number;
       token_model?: string;
       retention_handle?: string;
+      profile_id?: string;
     }>
   ): void;
   recordCompressionOriginal(params: RecordCompressionOriginalParams): string;
@@ -411,6 +412,7 @@ export interface CachelaneStats {
   compression_counts: {
     compressed_blocks: number;
     tokens_saved: number;
+    by_profile: { profile_id: string; tokens_saved: number; compressed_blocks: number }[];
   };
 }
 

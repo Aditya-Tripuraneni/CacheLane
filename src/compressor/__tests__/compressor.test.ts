@@ -144,7 +144,7 @@ describe("compress", () => {
     const logMsg = toolResultMsg("[INFO] starting\n[ERROR] failed\n[INFO] done", "log-tool");
     const config: CompressorConfig = {
       ...DEFAULT_CONFIG,
-      compressors: { json: false, log: true },
+      compressors: { json: false, log: true, shell: true },
     };
 
     const result = compress([jsonMsg, logMsg], config);
@@ -159,7 +159,7 @@ describe("compress", () => {
     const logMsg = toolResultMsg("[INFO] starting\n[ERROR] failed\n[INFO] done", "log-tool");
     const config: CompressorConfig = {
       ...DEFAULT_CONFIG,
-      compressors: { json: true, log: false },
+      compressors: { json: true, log: false, shell: true },
     };
 
     const result = compress([jsonMsg, logMsg], config);

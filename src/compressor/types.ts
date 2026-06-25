@@ -7,7 +7,7 @@ import type {
 
 export type { AnthropicMessage } from "../orchestrator/types.js";
 
-export type ContentType = "json" | "log" | "passthrough";
+export type ContentType = "json" | "log" | "shell" | "passthrough";
 export type CompressionMode = "lossless" | "balanced" | "aggressive";
 export type CompressionLossiness = "lossless" | "lossy" | "passthrough";
 export type CompressionOutcome = "compressed" | "passthrough" | "skipped" | "error" | "retrieval_backed";
@@ -19,6 +19,7 @@ export interface BlockCompressEvent {
   compressed_tokens: number;
   tokens_saved: number;
   compressor_id?: string;
+  profile_id?: string;
   mode?: CompressionMode;
   lossiness?: CompressionLossiness;
   outcome?: CompressionOutcome;
@@ -44,7 +45,9 @@ export interface CompressorConfig {
   compressors?: {
     json: boolean;
     log: boolean;
+    shell: boolean;
   };
+  shell_profiles?: Record<string, boolean>;
   retention?: {
     enabled: boolean;
     min_original_tokens: number;
@@ -57,6 +60,8 @@ export interface CompressorInput {
   content: string;
   mode: CompressionMode;
   json_max_array_items: number;
+  command?: string;
+  exit_code?: number;
 }
 
 export interface DetectionResult {

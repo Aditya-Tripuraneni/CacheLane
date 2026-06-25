@@ -103,7 +103,9 @@ export interface CachelaneConfig {
     compressors: {
       json: boolean;
       log: boolean;
+      shell: boolean;
     };
+    shell_profiles?: Record<string, boolean>;
     retention: {
       enabled: boolean;
       min_original_tokens: number;

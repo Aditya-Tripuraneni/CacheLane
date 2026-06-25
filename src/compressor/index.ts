@@ -1,12 +1,14 @@
 import { globMatch } from "../classifier/glob.js";
 import { countCompressionTokens } from "./token-accounting.js";
 import { detectContentType, routeCompression } from "./registry.js";
+import { matchProfile } from "./shell-profiles.js";
 import type {
   AnthropicMessage,
   BlockCompressEvent,
   CompressOptions,
   CompressorConfig,
   CompressResult,
+  ContentType,
   ToolResultContentBlock,
 } from "./types.js";
 
@@ -19,6 +21,38 @@ export type {
   CompressionMode,
   ToolOutputCompressor,
 } from "./types.js";
+
+interface CommandInfo {
+  command: string;
+  exit_code?: number;
+}
+
+function buildCommandMap(messages: AnthropicMessage[]): Map<string, CommandInfo> {
+  const map = new Map<string, CommandInfo>();
+  for (const msg of messages) {
+    for (const block of msg.content) {
+      if (
+        typeof block === "object" &&
+        block !== null &&
+        (block as { type?: string }).type === "tool_use" &&
+        (block as { name?: string }).name === "Bash"
+      ) {
+        const id = (block as { id?: string }).id;
+        const input = (block as { input?: unknown }).input;
+        const command =
+          typeof input === "object" && input !== null && typeof (input as { command?: unknown }).command === "string"
+            ? (input as { command: string }).command
+            : undefined;
+        const exitCodeRaw = typeof input === "object" && input !== null ? (input as { exit_code?: unknown }).exit_code : undefined;
+        const exit_code = typeof exitCodeRaw === "number" ? exitCodeRaw : undefined;
+        if (typeof id === "string" && command !== undefined) {
+          map.set(id, { command, exit_code });
+        }
+      }
+    }
+  }
+  return map;
+}
 
 function extractToolResultText(block: ToolResultContentBlock): string | null {
   if (typeof block.content === "string") return block.content;
@@ -50,20 +84,21 @@ function maybeRetainOriginal(params: {
   text: string;
   originalTokens: number;
   routed: {
-    content_type: "json" | "log" | "passthrough";
+    content_type: ContentType;
     compressor_id: string;
     lossiness: "lossless" | "lossy" | "passthrough";
   };
   mode: "lossless" | "balanced" | "aggressive";
   config: CompressorConfig;
   options: CompressOptions;
+  is_failure: boolean;
 }): string | undefined {
   const retention = params.config.retention;
   if (
     retention?.enabled !== true ||
     params.options.retainOriginal === undefined ||
     params.routed.lossiness !== "lossy" ||
-    params.originalTokens < retention.min_original_tokens
+    (params.originalTokens < retention.min_original_tokens && !params.is_failure)
   ) {
     return undefined;
   }
@@ -83,7 +118,7 @@ function maybeRetainOriginal(params: {
   }) ?? undefined;
 }
 
-function addRetrievalMarker(content: string, contentType: "json" | "log" | "passthrough", handle: string): string {
+function addRetrievalMarker(content: string, contentType: ContentType, handle: string): string {
   if (contentType === "json") {
     try {
       return JSON.stringify({
@@ -106,6 +141,7 @@ function compressBlock(
   block: ToolResultContentBlock,
   config: CompressorConfig,
   options: CompressOptions,
+  commandInfo: CommandInfo | undefined,
 ): { compressed: ToolResultContentBlock; event: BlockCompressEvent } | null {
   if (config.exclude.some((pattern) => globMatch(pattern, block.tool_use_id))) return null;
 
@@ -125,12 +161,25 @@ function compressBlock(
       return null;
     }
 
+    const candidateProfile = commandInfo !== undefined ? matchProfile(commandInfo.command) : null;
+    const shellEnabled = config.compressors?.shell !== false;
+    const profileEnabled =
+      candidateProfile === null || config.shell_profiles?.[candidateProfile.id] !== false;
+    const shellAllowed = shellEnabled && profileEnabled;
+    const effectiveCommand = shellAllowed ? commandInfo?.command : undefined;
+    const effectiveExitCode = shellAllowed ? commandInfo?.exit_code : undefined;
+
     const routed = routeCompression({
       tool_use_id: block.tool_use_id,
       content: text,
       mode,
       json_max_array_items: config.json_max_array_items,
+      command: effectiveCommand,
+      exit_code: effectiveExitCode,
     });
+
+    const profileId =
+      routed.compressor_id === "shell" ? candidateProfile?.id : undefined;
 
     const initialCompressedTokens = countCompressionTokens(routed.content, options.model);
     const initiallySmaller = initialCompressedTokens < originalTokens;
@@ -143,6 +192,7 @@ function compressBlock(
         mode,
         config,
         options,
+        is_failure: commandInfo?.exit_code !== undefined && commandInfo.exit_code !== 0,
       })
       : undefined;
     const finalText = retentionHandle !== undefined
@@ -166,6 +216,7 @@ function compressBlock(
         compressed_tokens: useCompressed ? finalCompressedTokens : originalTokens,
         tokens_saved: useCompressed ? originalTokens - finalCompressedTokens : 0,
         compressor_id: routed.compressor_id,
+        profile_id: useCompressed ? profileId : undefined,
         mode,
         lossiness: useCompressed ? routed.lossiness : "passthrough",
         outcome: effectiveRetentionHandle !== undefined ? "retrieval_backed" : useCompressed ? "compressed" : "passthrough",
@@ -210,6 +261,7 @@ export function compress(
   }
 
   const events: BlockCompressEvent[] = [];
+  const commandMap = buildCommandMap(messages);
   const newMessages = messages.map((msg) => {
     try {
       let changed = false;
@@ -223,7 +275,7 @@ export function compress(
         }
 
         const toolBlock = block as ToolResultContentBlock;
-        const result = compressBlock(toolBlock, config, options);
+        const result = compressBlock(toolBlock, config, options, commandMap.get(toolBlock.tool_use_id));
         if (!result) return block;
 
         events.push(result.event);

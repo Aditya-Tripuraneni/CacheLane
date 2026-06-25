@@ -428,12 +428,12 @@ export function openDatabase(dbPath: string): CachelaneDb {
       (id, turn_id, session_id, workspace_id, tool_use_id,
        content_type, original_tokens, compressed_tokens, tokens_saved,
        compressor_id, mode, lossiness, outcome, latency_ms, token_model,
-       retention_handle, created_at)
+       retention_handle, profile_id, created_at)
     VALUES
       (@id, @turn_id, @session_id, @workspace_id, @tool_use_id,
        @content_type, @original_tokens, @compressed_tokens, @tokens_saved,
        @compressor_id, @mode, @lossiness, @outcome, @latency_ms, @token_model,
-       @retention_handle, @created_at)
+       @retention_handle, @profile_id, @created_at)
   `);
 
   const insertCompressionOriginalStmt = rawDb.prepare(`
@@ -761,9 +761,19 @@ export function openDatabase(dbPath: string): CachelaneDb {
           FROM compression_events
           ${where.sql}
         `).get(where.bindings) as { compressed_blocks: number; tokens_saved: number } | undefined;
+        const profileRows = rawDb.prepare(`
+          SELECT profile_id,
+                 COALESCE(SUM(CASE WHEN tokens_saved > 0 THEN 1 ELSE 0 END), 0) AS compressed_blocks,
+                 COALESCE(SUM(tokens_saved), 0) AS tokens_saved
+          FROM compression_events
+          ${where.sql}${where.sql ? " AND" : " WHERE"} profile_id IS NOT NULL
+          GROUP BY profile_id
+          ORDER BY profile_id
+        `).all(where.bindings) as { profile_id: string; compressed_blocks: number; tokens_saved: number }[];
         return {
           compressed_blocks: compRow?.compressed_blocks ?? 0,
           tokens_saved: compRow?.tokens_saved ?? 0,
+          by_profile: profileRows,
         };
       })(),
     };
@@ -786,6 +796,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
       latency_ms?: number;
       token_model?: string;
       retention_handle?: string;
+      profile_id?: string;
     }>
   ) => {
     const now = Date.now();
@@ -807,6 +818,7 @@ export function openDatabase(dbPath: string): CachelaneDb {
         latency_ms: event.latency_ms ?? null,
         token_model: event.token_model ?? null,
         retention_handle: event.retention_handle ?? null,
+        profile_id: event.profile_id ?? null,
         created_at: now,
       });
     }
