@@ -14,6 +14,10 @@ import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
 import aws4 from "aws4";
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
+import { countTokens } from "../tokenizer/index.js";
+import { reconcileTurnCost } from "../reconciler/index.js";
+
+const tokenCache = new Map<string, number>();
 
 const DEFAULT_UPSTREAM_HOST = "api.anthropic.com";
 const DEFAULT_UPSTREAM_PORT = 443;
@@ -208,7 +212,8 @@ export function computeBlockPlacements(
               volatility: row.volatility,
               is_pinned: row.is_pinned === 1,
               refetch_handle: row.refetch_handle,
-              restored_at_turn: row.restored_at_turn
+              restored_at_turn: row.restored_at_turn,
+              token_count: row.token_count
             });
           }
         }
@@ -829,6 +834,32 @@ function recordUsageFromResponse(
 
     try {
       if (typeof opts.db.updateTurnExplanationUsage === "function") {
+        let regionCost = null;
+        try {
+          const currentExp = opts.db.getTurnExplanation({ workspace_id: opts.workspaceId, session_id: opts.sessionId, turn_number: opts.currentTurn });
+          const prevExp = opts.currentTurn > 1 ? opts.db.getTurnExplanation({ workspace_id: opts.workspaceId, session_id: opts.sessionId, turn_number: opts.currentTurn - 1 }) : null;
+          
+          if (currentExp) {
+            const usage = {
+              input_tokens: inputTokens,
+              output_tokens: outputTokens,
+              cache_creation_5m_tokens: cacheCreation5m,
+              cache_creation_1h_tokens: cacheCreation1h,
+              cache_read_tokens: cacheRead,
+              effective_cost_units: effective,
+            };
+            
+            regionCost = reconcileTurnCost(
+              usage,
+              currentExp.block_metadata,
+              { prefix_breakpoint_hash: opts.prefixHash || null, middle_breakpoint_hash: opts.middleHash },
+              prevExp ? { prefix_breakpoint_hash: prevExp.prefix_breakpoint_hash, middle_breakpoint_hash: prevExp.middle_breakpoint_hash } : null
+            );
+          }
+        } catch (reconcileErr) {
+          logger.error("failed to compute region cost breakdown", String(reconcileErr), reconcileErr);
+        }
+
         opts.db.updateTurnExplanationUsage(
           opts.turnId,
           {
@@ -839,6 +870,7 @@ function recordUsageFromResponse(
             cache_read_tokens: cacheRead,
             effective_cost_units: effective,
           },
+          regionCost,
           Date.now()
         );
       }
@@ -875,8 +907,13 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
         for (const c of msg.content) {
           if (c.type === "tool_result" && c.tool_use_id) {
             const contentStr = typeof c.content === "string" ? c.content : JSON.stringify(c.content);
-            const tokenCount = Math.ceil(contentStr.length / 4);
             const contentHash = createHash("sha256").update(contentStr).digest("hex");
+            
+            let tokenCount = tokenCache.get(contentHash);
+            if (tokenCount === undefined) {
+              tokenCount = countTokens(contentStr, opts.model);
+              tokenCache.set(contentHash, tokenCount);
+            }
             
             try {
               opts.db.insertBlock({

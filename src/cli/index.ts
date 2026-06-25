@@ -22,7 +22,7 @@ import {
   setTelemetryOptIn,
 } from "./config.js";
 import { formatDoctor, runDoctorAsync } from "./doctor.js";
-import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
+import { formatExplanation, formatSessions, formatStats, formatTopBlocks, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
 import {
@@ -359,16 +359,23 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .option("--session-id <id>", "Session scope")
     .option("--db <path>", "SQLite database path")
     .option("--json", "Print stable JSON")
+    .option("--top-blocks [number]", "Show top N blocks by token count", parsePositiveLimit)
     .action((cmd: JsonCommandOptions & {
       turn?: number;
       workspaceId?: string;
       sessionId?: string;
       db?: string;
+      topBlocks?: number | boolean;
     }) => {
       const { context, close } = contextFromOptions(env, cmd);
       try {
         const result = handleExplainTool(context, { turn: cmd.turn });
-        io.stdout(cmd.json ? jsonLine(result) : `${formatExplanation(result)}\n`);
+        if (cmd.topBlocks) {
+          const limit = typeof cmd.topBlocks === "number" ? cmd.topBlocks : 10;
+          io.stdout(cmd.json ? jsonLine(result) : `${formatTopBlocks(result, limit)}\n`);
+        } else {
+          io.stdout(cmd.json ? jsonLine(result) : `${formatExplanation(result)}\n`);
+        }
       } finally {
         close();
       }
@@ -527,10 +534,10 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
   program
     .command("compression-compressor")
     .description("Enable or disable a specific tool output compressor")
-    .argument("<compressor>", "json or log")
+    .argument("<compressor>", "json, log, or shell")
     .argument("<state>", "enable or disable")
     .action((compressor: string, state: string) => {
-      if (!["json", "log"].includes(compressor)) {
+      if (!["json", "log", "shell"].includes(compressor)) {
         throw new Error(`Invalid compression compressor: ${compressor}`);
       }
       if (!["enable", "disable"].includes(state)) {
@@ -540,7 +547,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
         io,
         setCompressionCompressorEnabled(
           cachelaneConfigPath(env),
-          compressor as "json" | "log",
+          compressor as "json" | "log" | "shell",
           state === "enable",
         ),
       );

@@ -33,6 +33,7 @@ export interface PromptBlockPlacement {
   is_pinned: boolean;
   refetch_handle: string | null;
   restored_at_turn?: number | null;
+  token_count: number;
 }
 
 export interface MaterializableContentItem {

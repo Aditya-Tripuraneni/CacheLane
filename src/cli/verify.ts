@@ -61,6 +61,7 @@ export function runVerify(): VerifyReport {
       block_placements: [{
         block_id: blockId, message_index: 0, content_index: 0, kind: "tool_output",
         volatility: "VOLATILE", is_pinned: false, refetch_handle: JSON.stringify({ type: "tool_use", id: blockId }),
+        token_count: 0,
       }],
       pruner: { enabled: true, k: 3, mode: "default" },
     });

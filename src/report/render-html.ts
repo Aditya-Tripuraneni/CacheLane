@@ -55,6 +55,13 @@ export function renderReportHtml(data: ReportData, benchmark?: RecordedBenchmark
     .map((s) => `<tr><td>${esc(s.session_id)}</td><td>${s.turns}</td><td>${pct(s.cache_hit_ratio)}</td><td>${pct(s.savings_ratio)}</td></tr>`)
     .join("") || `<tr><td colspan="4">No sessions yet</td></tr>`;
 
+  const profileRows = data.stats.compression_counts.by_profile
+    .map((p) => `<tr><td>${esc(p.profile_id)}</td><td>${p.compressed_blocks}</td><td>${p.tokens_saved}</td></tr>`)
+    .join("");
+  const profileTableHtml = profileRows
+    ? `<table><thead><tr><th>Profile</th><th>Compressed blocks</th><th>Tokens saved</th></tr></thead><tbody>${profileRows}</tbody></table>`
+    : "";
+
   const usageHtml = `
   <div class="cards">
   ${card("Savings", pct(data.stats.savings_ratio))}
@@ -66,7 +73,8 @@ export function renderReportHtml(data: ReportData, benchmark?: RecordedBenchmark
   ${card("Est. compression saved", String(data.stats.compression_counts.tokens_saved))}
   ${card("Fail-open turns", String(data.stats.pipeline_fallback_turns), data.stats.pipeline_fallback_turns > 0)}
 </div>
-<table><thead><tr><th>Session</th><th>Turns</th><th>Hit</th><th>Savings</th></tr></thead><tbody>${sessionRows}</tbody></table>`;
+<table><thead><tr><th>Session</th><th>Turns</th><th>Hit</th><th>Savings</th></tr></thead><tbody>${sessionRows}</tbody></table>
+${profileTableHtml}`;
 
   const curveHtml = `
 ${curve}

@@ -56,6 +56,15 @@ export const DEFAULT_CONFIG: CachelaneConfig = {
     compressors: {
       json: true,
       log: true,
+      shell: true,
+    },
+    shell_profiles: {
+      "git-status": true,
+      "git-diff": true,
+      "git-log": true,
+      "pkg-install": true,
+      "test-run": true,
+      "build": true,
     },
     retention: {
       enabled: false,

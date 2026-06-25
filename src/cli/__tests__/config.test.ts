@@ -84,5 +84,10 @@ describe("compression config helpers", () => {
     const logDisabled = setCompressionCompressorEnabled(configPath, "log", false);
     expect(logDisabled.compression.compressors.json).toBe(false);
     expect(logDisabled.compression.compressors.log).toBe(false);
+
+    const shellDisabled = setCompressionCompressorEnabled(configPath, "shell", false);
+    expect(shellDisabled.compression.compressors.shell).toBe(false);
+    expect(shellDisabled.compression.compressors.json).toBe(false);
+    expect(shellDisabled.compression.compressors.log).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { loadConfig, CURRENT_CONFIG_VERSION, defaultWorkspaceId } from "../index.js";
+import { DEFAULT_CONFIG } from "../defaults.js";
 import type { CachelaneConfig } from "../../types/index.js";
 
 let tmpDir: string;
@@ -99,7 +100,7 @@ describe("loadConfig", () => {
     expect(config.proxy.upstream_path_prefix).toBe("/anthropic");
     expect(config.compression.enabled).toBe(true);
     expect(config.compression.mode).toBe("lossless");
-    expect(config.compression.compressors).toEqual({ json: true, log: true });
+    expect(config.compression.compressors).toEqual({ json: true, log: true, shell: true });
     expect(config.compression.retention.enabled).toBe(false);
   });
 
@@ -134,7 +135,7 @@ describe("loadConfig", () => {
     expect(config.compression.mode).toBe("lossless");
     expect(config.compression.exclude).toEqual([]);
     expect(config.compression.json_max_array_items).toBe(20);
-    expect(config.compression.compressors).toEqual({ json: true, log: true });
+    expect(config.compression.compressors).toEqual({ json: true, log: true, shell: true });
     expect(config.compression.retention).toEqual({
       enabled: false,
       min_original_tokens: 1000,
@@ -191,6 +192,10 @@ describe("loadConfig", () => {
     const config = loadConfig(configPath);
     expect(config.version).toBe(CURRENT_CONFIG_VERSION);
     expect(config.pruner.k).toBe(3);
+  });
+
+  it("enables the shell compressor by default", () => {
+    expect(DEFAULT_CONFIG.compression.compressors.shell).toBe(true);
   });
 
   it("falls back to defaults when pruner.k is out of range", () => {

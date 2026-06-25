@@ -298,6 +298,7 @@ describe("openDatabase", () => {
           volatility: "VOLATILE",
           is_pinned: false,
           has_refetch_handle: true,
+          token_count: 100,
         },
       ],
       region_metadata: {
@@ -413,6 +414,7 @@ describe("openDatabase", () => {
       "01HZXQ5K0000000000000003",
       "view:auth.py:1-50",
       "Read auth.py:1-50 (800 tokens elided)",
+      10,
       now + 2000
     );
 
@@ -452,9 +454,9 @@ describe("openDatabase", () => {
     }
 
     db.markStubs([
-      { id: "BS1", workspace_id: ws, session_id: sess, refetchHandle: "view:BS1.ts:1-10", stubSummary: "BS1 stub", updatedAt: NOW + 1 },
-      { id: "BS2", workspace_id: ws, session_id: sess, refetchHandle: "view:BS2.ts:1-10", stubSummary: "BS2 stub", updatedAt: NOW + 1 },
-      { id: "BS3", workspace_id: ws, session_id: sess, refetchHandle: "view:BS3.ts:1-10", stubSummary: "BS3 stub", updatedAt: NOW + 1 },
+      { id: "BS1", workspace_id: ws, session_id: sess, refetchHandle: "view:BS1.ts:1-10", stubSummary: "BS1 stub", tokenCount: 10, updatedAt: NOW + 1 },
+      { id: "BS2", workspace_id: ws, session_id: sess, refetchHandle: "view:BS2.ts:1-10", stubSummary: "BS2 stub", tokenCount: 10, updatedAt: NOW + 1 },
+      { id: "BS3", workspace_id: ws, session_id: sess, refetchHandle: "view:BS3.ts:1-10", stubSummary: "BS3 stub", tokenCount: 10, updatedAt: NOW + 1 },
     ]);
 
     for (const id of ["BS1", "BS2", "BS3"]) {
