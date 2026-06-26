@@ -276,15 +276,15 @@ export function openDatabase(dbPath: string): CachelaneDb {
 
   const insertTurnStmt = rawDb.prepare(`
     INSERT OR IGNORE INTO turns
-      (id, workspace_id, session_id, turn_number, model,
+      (id, workspace_id, session_id, turn_number, model, provider,
        input_tokens, output_tokens,
-       cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens,
+       cache_creation_5m_tokens, cache_creation_1h_tokens, cache_read_tokens, cache_write_tokens,
        effective_cost_units, prefix_breakpoint_hash, middle_breakpoint_hash,
        pruned_blocks_count, keepalive_pings_since_last_turn, signals, request_mutated, created_at)
     VALUES
-      (@id, @workspace_id, @session_id, @turn_number, @model,
+      (@id, @workspace_id, @session_id, @turn_number, @model, @provider,
        @input_tokens, @output_tokens,
-       @cache_creation_5m_tokens, @cache_creation_1h_tokens, @cache_read_tokens,
+       @cache_creation_5m_tokens, @cache_creation_1h_tokens, @cache_read_tokens, @cache_write_tokens,
        @effective_cost_units, @prefix_breakpoint_hash, @middle_breakpoint_hash,
        @pruned_blocks_count, @keepalive_pings_since_last_turn, @signals, @request_mutated, @created_at)
   `);
