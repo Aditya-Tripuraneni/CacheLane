@@ -25,6 +25,7 @@ import { formatDoctor, runDoctorAsync } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, formatTopBlocks, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
+import { aiderTarget } from "./install-targets/aider.js";
 import {
   cachelaneHome,
   cachelaneConfigPath,
@@ -246,11 +247,13 @@ async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, un
             session_id: sessionId,
             turn_number: currentTurn,
             model: call.model,
+            provider: "anthropic",
             input_tokens: call.input_tokens,
             output_tokens: call.output_tokens,
             cache_creation_5m_tokens: call.cache_creation_5m_tokens,
             cache_creation_1h_tokens: call.cache_creation_1h_tokens,
             cache_read_tokens: call.cache_read_tokens,
+            cache_write_tokens: call.cache_creation_5m_tokens + call.cache_creation_1h_tokens,
             effective_cost_units: effective,
             prefix_breakpoint_hash: null,
             middle_breakpoint_hash: null,
@@ -660,8 +663,29 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
 
   program
     .command("install")
-    .description("Register CacheLane MCP and hook integration")
-    .action(() => {
+    .description("Register CacheLane integration for a target tool")
+    .option("--target <name>", "Install target: claude-code (default) or aider", "claude-code")
+    .action((cmd: { target?: string }) => {
+      const target = cmd.target ?? "claude-code";
+      if (target === "aider") {
+        // Aider reads its API base from the OPENAI_API_BASE process env var.
+        // We don't write Aider config files — emit the redirect instruction so
+        // the user can export it into their environment.
+        const config = loadConfig(cachelaneConfigPath(env));
+        const port = config.proxy.port;
+        io.stdout(
+          jsonLine({
+            target: aiderTarget.name,
+            redirect_mechanism: aiderTarget.redirectMechanism,
+            env_var: aiderTarget.envVars[0],
+            instruction: `${aiderTarget.envVars[0]}=http://127.0.0.1:${port}/v1`,
+          }),
+        );
+        return;
+      }
+      if (target !== "claude-code") {
+        throw new Error(`Unknown install target: ${target}`);
+      }
       io.stdout(jsonLine(installCachelane(env)));
     });
 

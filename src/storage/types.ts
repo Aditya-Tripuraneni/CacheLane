@@ -35,11 +35,13 @@ export interface TurnRow {
   session_id: string;
   turn_number: number;
   model: string;
+  provider: string;
   input_tokens: number;
   output_tokens: number;
   cache_creation_5m_tokens: number;
   cache_creation_1h_tokens: number;
   cache_read_tokens: number;
+  cache_write_tokens: number;
   effective_cost_units: number;
   prefix_breakpoint_hash: string | null;
   middle_breakpoint_hash: string | null;
@@ -79,11 +81,13 @@ export interface InsertTurnParams {
   session_id: string;
   turn_number: number;
   model: string;
+  provider: string;
   input_tokens: number;
   output_tokens: number;
   cache_creation_5m_tokens: number;
   cache_creation_1h_tokens: number;
   cache_read_tokens: number;
+  cache_write_tokens: number;
   effective_cost_units: number;
   prefix_breakpoint_hash: string | null;
   middle_breakpoint_hash: string | null;

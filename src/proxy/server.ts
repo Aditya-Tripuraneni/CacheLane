@@ -8,7 +8,8 @@ import { classifyBlock } from "../classifier/index.js";
 import { compress } from "../compressor/index.js";
 import { CacheStateTracker } from "../orchestrator/index.js";
 import { logger } from "../logger/index.js";
-import { eventStreamToSSE, isEventStreamContentType } from "./eventstream.js";
+import { selectAdapter } from "../providers/registry.js";
+import type { ProviderAdapter } from "../providers/types.js";
 import type { AnthropicMessagesRequest, AnthropicMessage } from "../orchestrator/index.js";
 import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
@@ -360,12 +361,15 @@ export function createProxyServer(
 
       logger.info("incoming", JSON.stringify({ method, path: reqPath }));
 
-      // Only intercept POST /v1/messages or Bedrock /model/* paths
-      // Claude Code appends ?beta=true and similar query params
+      // Only intercept routes a provider adapter claims. Claude Code appends
+      // ?beta=true and similar query params; matchRoute strips the query itself.
+      // isBedrock is derived independently because the SigV4 signing path below
+      // depends on it (a Bedrock /model/* request must be re-signed).
       const pathOnly = reqPath.split("?")[0];
       const isBedrock = pathOnly?.startsWith("/model/");
-      
-      if (method !== "POST" || (pathOnly !== "/v1/messages" && !isBedrock)) {
+      const adapter = selectAdapter(method, reqPath);
+
+      if (!adapter) {
         forwardUpstream(upstream, method, reqPath, headersFromIncoming(req), body, res);
         return;
       }
@@ -398,6 +402,73 @@ export function createProxyServer(
         });
 
         const config = loadConfig(opts.config_path ?? defaultConfigPath());
+
+        // OpenAI chat requests MUST NOT go through the Anthropic breakpoint
+        // pipeline — the breakpoint placer injects Anthropic `cache_control`
+        // blocks, which OpenAI rejects with HTTP 400. Instead we apply OpenAI
+        // cache hints (prompt_cache_key) via the adapter, skip keepalive
+        // (cachePolicy.supportsKeepalive === false), and skip Bedrock signing
+        // (isBedrock is false for /v1/chat/completions). K-pruning for OpenAI is
+        // OUT OF SCOPE here (deferred to Task 7b) — extractAndInsertToolResults
+        // keys on Anthropic tool_result blocks, so it is a no-op for OpenAI.
+        if (adapter.name === "openai-chat") {
+          const normalized = adapter.normalizeRequest(parsed);
+          const prefixHash = createHash("sha256")
+            .update(
+              JSON.stringify({ system: normalized.system, tools: normalized.tools }),
+              "utf8",
+            )
+            .digest("hex");
+          const hinted = adapter.applyCacheHints(normalized, {
+            prefix_hash: prefixHash,
+            middle_hash: null,
+          });
+          const actuallyMutate = config.features.mutation_enabled;
+          const forwardBody = actuallyMutate
+            ? Buffer.from(JSON.stringify(adapter.denormalize(hinted)), "utf-8")
+            : body;
+
+          const finalSignals = ["provider:openai-chat"];
+          if (!config.features.mutation_enabled) finalSignals.push("mode:baseline");
+
+          if (actuallyMutate) {
+            logger.info(
+              "mutated request",
+              JSON.stringify({
+                session: sessionId,
+                turn: currentTurn,
+                signals: finalSignals,
+                pruned: 0,
+              }),
+            );
+          }
+
+          // Bedrock signing is gated on isBedrock, which is false for
+          // /v1/chat/completions — forward headers via the non-Bedrock path.
+          // sanitiseForwardHeaders only drops accept-encoding/transfer-encoding;
+          // the inbound Authorization/x-api-key are preserved.
+          const finalHeaders = sanitiseForwardHeaders(headersFromIncoming(req));
+          finalHeaders["content-length"] = String(forwardBody.length);
+
+          proxyAndRecord(upstream, method, reqPath, finalHeaders, forwardBody, res, {
+            db,
+            adapter,
+            workspaceId,
+            sessionId,
+            currentTurn,
+            turnId,
+            model: parsed.model,
+            prefixHash,
+            middleHash: null,
+            prunedCount: 0,
+            requestMutated: actuallyMutate ? 1 : 0,
+            signals: finalSignals,
+            // OpenAI cachePolicy.supportsKeepalive === false → no keepalive pings.
+            keepalivePings: 0,
+          });
+          return;
+        }
+
         const compressionEnabled = config.features.mutation_enabled && config.compression.enabled;
         const compressionResult = compressionEnabled
           ? compress(parsed.messages, config.compression, {
@@ -493,6 +564,7 @@ export function createProxyServer(
 
         proxyAndRecord(finalUpstream, method, reqPath, finalHeaders, forwardBody, res, {
           db,
+          adapter,
           workspaceId,
           sessionId,
           currentTurn,
@@ -547,6 +619,7 @@ export function createProxyServer(
         }
         proxyAndRecord(fallbackUpstream, method, reqPath, fallbackHeaders, body, res, {
           db,
+          adapter,
           workspaceId,
           sessionId,
           currentTurn: fallbackTurn,
@@ -634,6 +707,7 @@ export function startProxy(opts: ProxyOptions = {}): http.Server {
 
 interface RecordOptions {
   db: CachelaneDb;
+  adapter?: ProviderAdapter;
   workspaceId: string;
   sessionId: string;
   currentTurn: number;
@@ -731,72 +805,20 @@ function recordUsageFromResponse(
   contentType?: string,
 ): void {
   try {
-    // AWS Bedrock streaming returns binary event-stream framing rather than
-    // text SSE. Decode it into Anthropic-style `data: {json}` lines so the same
-    // parser below extracts usage. Falls back to raw text for Anthropic SSE/JSON.
-    const text = isEventStreamContentType(contentType)
-      ? eventStreamToSSE(raw)
-      : raw.toString("utf-8");
-    interface UsageFields {
-      input_tokens?: number;
-      output_tokens?: number;
-      cache_creation_input_tokens?: number;
-      cache_creation_5m_tokens?: number;
-      cache_creation_1h_tokens?: number;
-      cache_read_input_tokens?: number;
-    }
-    let usage: UsageFields | null = null;
-
-    // Parse SSE events in order: message_start carries input/cache tokens,
-    // message_delta carries the final output_tokens.
-    for (const line of text.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed.startsWith("data:")) continue;
-      const jsonPart = trimmed.slice(5).trim();
-      try {
-        const evt = JSON.parse(jsonPart) as Record<string, unknown>;
-        if (evt.type === "message_start" && evt.message) {
-          const msg = evt.message as Record<string, unknown>;
-          if (msg.usage) usage = msg.usage as UsageFields;
-          // Don't break: message_delta later in the stream carries output_tokens
-        }
-        if (evt.type === "message_delta" && evt.usage) {
-          const delta = evt.usage as UsageFields;
-          if (usage !== null) {
-            // For each field, prefer the delta value when present, else keep the
-            // value seeded by message_start. (The `?? usage` fallback already
-            // applies the delta whenever it is non-nullish.)
-            usage = {
-              ...usage,
-              input_tokens: delta.input_tokens ?? usage.input_tokens,
-              output_tokens: delta.output_tokens ?? usage.output_tokens,
-              cache_creation_input_tokens: delta.cache_creation_input_tokens ?? usage.cache_creation_input_tokens,
-              cache_creation_5m_tokens: delta.cache_creation_5m_tokens ?? usage.cache_creation_5m_tokens,
-              cache_creation_1h_tokens: delta.cache_creation_1h_tokens ?? usage.cache_creation_1h_tokens,
-              cache_read_input_tokens: delta.cache_read_input_tokens ?? usage.cache_read_input_tokens,
-            };
-          } else {
-            usage = { ...delta };
-          }
-        }
-      } catch { /* skip malformed SSE lines */ }
-    }
-
-    // Fall back to non-streaming JSON response body
-    if (!usage) {
-      try {
-        const json = JSON.parse(text) as { usage?: UsageFields };
-        if (json.usage) usage = json.usage;
-      } catch { /* not JSON */ }
-    }
+    // Usage parsing (SSE/event-stream/JSON decode) is owned by the provider
+    // adapter. Standalone/legacy callers may omit it; default to the Anthropic
+    // adapter so they keep working. The adapter returns a NeutralUsage that
+    // preserves the cache-write TTL tier split (5m vs 1h) for lossless cost math.
+    const adapter = opts.adapter ?? selectAdapter("POST", "/v1/messages");
+    const usage = adapter ? adapter.parseUsage(raw, contentType) : null;
 
     if (!usage) return;
 
-    const inputTokens = usage.input_tokens ?? 0;
-    const outputTokens = usage.output_tokens ?? 0;
-    const cacheCreation5m = usage.cache_creation_5m_tokens ?? usage.cache_creation_input_tokens ?? 0;
-    const cacheCreation1h = usage.cache_creation_1h_tokens ?? 0;
-    const cacheRead = usage.cache_read_input_tokens ?? 0;
+    const inputTokens = usage.input;
+    const outputTokens = usage.output;
+    const cacheCreation5m = usage.cacheWrite5m;
+    const cacheCreation1h = usage.cacheWrite1h;
+    const cacheRead = usage.cacheRead;
 
     const effective = calculateEffectiveCostUnits({
       input_tokens: inputTokens,
@@ -812,11 +834,13 @@ function recordUsageFromResponse(
         session_id: opts.sessionId,
         turn_number: opts.currentTurn,
         model: opts.model,
+        provider: opts.adapter?.name ?? "anthropic",
         input_tokens: inputTokens,
         output_tokens: outputTokens,
         cache_creation_5m_tokens: cacheCreation5m,
         cache_creation_1h_tokens: cacheCreation1h,
         cache_read_tokens: cacheRead,
+        cache_write_tokens: cacheCreation5m + cacheCreation1h,
         effective_cost_units: effective,
         prefix_breakpoint_hash: opts.prefixHash || null,
         middle_breakpoint_hash: opts.middleHash,
