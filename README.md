@@ -232,6 +232,55 @@ cachelane stats --scope all --session-id <session-id>
 
 Sessions are keyed by Claude Code's own session id, so the value in the `cachelane sessions` table is exactly what `--session-id` expects.
 
+### Per-block cost attribution (`explain --top-blocks`)
+
+`cachelane stats` shows aggregate savings, but it doesn't tell you *which blocks* are eating your budget. The `--top-blocks` flag on `explain` breaks that down:
+
+```bash
+cachelane explain --top-blocks        # top 10 blocks by token weight (default)
+cachelane explain --top-blocks 5      # top 5
+cachelane explain --turn 3 --top-blocks 20   # specific turn, top 20
+```
+
+Sample output:
+
+```
+Turn 42 — Top blocks by token weight
+
+  Block ID                                Kind            Region      Tokens  Tier              Est. Cost
+  ──────────────────────────────────────────────────────────────────────────────────────────────────
+  block-2-file1                           file_read       STABLE       15000  cache_read        1500.0 cu
+  block-3-file2                           file_read       SEMI          8500  cache_creation_5m  10625.0 cu
+  block-6-tool2                           tool_output     VOLATILE      4500  input (1x)        4500.0 cu
+  block-1-system                          system_prompt   STABLE        4000  cache_read        400.0 cu
+  block-4-tool                            tool_output     SEMI          3200  cache_creation_5m  4000.0 cu
+  block-5-user                            user_message    VOLATILE        50  input (1x)        50.0 cu
+
+  Region totals:
+    STABLE  :    19000 tokens → cache_read         (0.1x)     →  1900.0 cu
+    SEMI    :    11700 tokens → cache_creation_5m  (1.25x/2x) → 14625.0 cu
+    VOLATILE:     4550 tokens → input              (1x)       →  4550.0 cu
+    Total effective: 21075.0 cu  (vs. 35250.0 baseline — 40.2% savings)
+```
+
+Each block shows:
+
+- **Region**: which volatility bucket (STABLE / SEMI / VOLATILE) the block landed in.
+- **Tier**: the actual billing tier from the API response — `cache_read` (0.1×), `cache_creation_5m` (1.25×), `cache_creation_1h` (2×), or `input` (1×).
+- **Est. Cost**: token count × tier multiplier, in cost units.
+
+The region totals at the bottom reconcile exactly to the authoritative `usage` object from the Anthropic API response — these are real billing numbers, not estimates.
+
+**How it works under the hood:**
+
+1. On each turn, the proxy tokenizes every block using Anthropic's tokenizer (with an in-memory cache keyed by `content_hash` so identical blocks are never re-tokenized).
+2. After the API response arrives with the `usage` object, a **reconciler** determines each region's billing tier by comparing the current turn's breakpoint hashes against the previous turn's:
+   - If `prefix_breakpoint_hash` matches → STABLE hit `cache_read`.
+   - If `middle_breakpoint_hash` matches → SEMI hit `cache_read`.
+   - If a breakpoint changed → that region paid `cache_creation_5m` or `cache_creation_1h`.
+   - VOLATILE is always billed at `input` (1×).
+3. The reconciled `RegionCostBreakdown` is stored in `region_cost_json` on the `turn_explanations` table.
+
 ---
 
 ## Command reference
@@ -243,9 +292,10 @@ Sessions are keyed by Claude Code's own session id, so the value in the `cachela
 | `cachelane install` | Register the MCP server + hooks and redirect Claude Code traffic through the proxy. Idempotent. |
 | `cachelane uninstall [--purge]` | Remove the integration. `--purge` also deletes `~/.cachelane` (config + database). |
 | `cachelane doctor [--json]` | Health check: Node version, config, SQLite writability, MCP + hook registration. |
-| `cachelane stats [--scope session\|workspace\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
+| `cachelane stats [--scope session\\|workspace\\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
 | `cachelane sessions [--json]` | List all recorded sessions with hit ratio and savings. |
-| `cachelane explain [--turn <N>] [--json]` | Show how CacheLane classified and pruned blocks, and where it placed cache breakpoints, for a turn. |
+| `cachelane report [--scope session\\|workspace\\|all]` | Generate and open a self-contained HTML dashboard webpage of your savings. |
+| `cachelane explain [--turn <N>] [--top-blocks [N]] [--json]` | Show how CacheLane classified and pruned blocks, and where it placed cache breakpoints, for a turn. `--top-blocks` ranks blocks by token cost. |
 | `cachelane config` | Print the active configuration. |
 
 ### Tuning
@@ -272,7 +322,10 @@ These are run for you or are for debugging; you normally never invoke them:
 | `cachelane mcp` | The MCP + proxy server. **Auto-started by Claude Code.** Do not run it manually. |
 | `cachelane proxy [--port]` | Standalone proxy, for setups *not* using the MCP server. Collides with the auto-started proxy if both run. |
 | `cachelane debug pruner [--limit <N>]` | Dump recent pruner debug entries as JSON. |
-| `cachelane benchmark <compare\|live-report\|ab-test\|dashboard>` | Local benchmarking / live savings dashboard. |
+| `cachelane benchmark dashboard` | Open a live terminal TUI dashboard to view real-time savings. |
+| `cachelane benchmark latency` | Live TTFT A/B test (CacheLane proxy vs raw direct) to measure speed. |
+| `cachelane benchmark duel` | Run CacheLane ON vs OFF on recorded scenarios and emit a comparison report. |
+| `cachelane benchmark <compare\\|correctness\\|live-report\\|ab-test>` | Suite of tools for offline trace comparisons, rehydration recall, and testing. |
 | `cachelane hook <name>` | Claude Code hook entrypoint (records turn stats in hook mode). |
 
 ### MCP tools (exposed to Claude)

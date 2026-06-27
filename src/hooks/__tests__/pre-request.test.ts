@@ -71,6 +71,7 @@ function placement(block_id: string): PromptBlockPlacement {
     volatility: "VOLATILE",
     is_pinned: false,
     refetch_handle: "tool:read:src/auth.ts",
+    token_count: 0,
   };
 }
 

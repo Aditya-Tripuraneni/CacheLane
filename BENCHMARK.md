@@ -40,8 +40,13 @@ the default gate.
 assistant text, tool output, or file contents. They contain scenario IDs, counts,
 token estimates, and aggregate ratios only.
 
-## Optional Live Work
+## Live Benchmarks & Analysis
 
-Future live experiments can consume the same normalized trace format, but they
-must remain opt-in and credential-gated. M8 acceptance does not require live API
-calls.
+CacheLane now supports a suite of live benchmark tools that run directly against Anthropic's API or analyze your live data:
+
+- **Latency A/B (`npm run benchmark:latency`)**: Measures Time-To-First-Token (TTFT) by running scenarios directly to Anthropic versus through the CacheLane proxy. Requires `ANTHROPIC_API_KEY`.
+- **Correctness (`npm run benchmark:correctness`)**: Tests rehydration recall and stale-answer rates to ensure the proxy's context pruning does not degrade the model's ability to answer correctly.
+- **Compression (`npm run benchmark:compression`)**: Benchmarks the performance overhead of CacheLane's tool-output compressors.
+- **HTML Dashboard (`cachelane report`)**: Generates a self-contained HTML visual dashboard of your real-world savings, cache hit ratios, and orchestration using your local SQLite database.
+
+You can also run the terminal dashboard live while you work using `cachelane benchmark dashboard`.

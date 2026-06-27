@@ -22,9 +22,10 @@ import {
   setTelemetryOptIn,
 } from "./config.js";
 import { formatDoctor, runDoctorAsync } from "./doctor.js";
-import { formatExplanation, formatSessions, formatStats, jsonLine } from "./format.js";
+import { formatExplanation, formatSessions, formatStats, formatTopBlocks, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
 import { installCachelane, uninstallCachelane } from "./install.js";
+import { aiderTarget } from "./install-targets/aider.js";
 import {
   cachelaneHome,
   cachelaneConfigPath,
@@ -246,11 +247,13 @@ async function handleHookEvent(env: NodeJS.ProcessEnv, parsed: Record<string, un
             session_id: sessionId,
             turn_number: currentTurn,
             model: call.model,
+            provider: "anthropic",
             input_tokens: call.input_tokens,
             output_tokens: call.output_tokens,
             cache_creation_5m_tokens: call.cache_creation_5m_tokens,
             cache_creation_1h_tokens: call.cache_creation_1h_tokens,
             cache_read_tokens: call.cache_read_tokens,
+            cache_write_tokens: call.cache_creation_5m_tokens + call.cache_creation_1h_tokens,
             effective_cost_units: effective,
             prefix_breakpoint_hash: null,
             middle_breakpoint_hash: null,
@@ -359,16 +362,23 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .option("--session-id <id>", "Session scope")
     .option("--db <path>", "SQLite database path")
     .option("--json", "Print stable JSON")
+    .option("--top-blocks [number]", "Show top N blocks by token count", parsePositiveLimit)
     .action((cmd: JsonCommandOptions & {
       turn?: number;
       workspaceId?: string;
       sessionId?: string;
       db?: string;
+      topBlocks?: number | boolean;
     }) => {
       const { context, close } = contextFromOptions(env, cmd);
       try {
         const result = handleExplainTool(context, { turn: cmd.turn });
-        io.stdout(cmd.json ? jsonLine(result) : `${formatExplanation(result)}\n`);
+        if (cmd.topBlocks) {
+          const limit = typeof cmd.topBlocks === "number" ? cmd.topBlocks : 10;
+          io.stdout(cmd.json ? jsonLine(result) : `${formatTopBlocks(result, limit)}\n`);
+        } else {
+          io.stdout(cmd.json ? jsonLine(result) : `${formatExplanation(result)}\n`);
+        }
       } finally {
         close();
       }
@@ -527,10 +537,10 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
   program
     .command("compression-compressor")
     .description("Enable or disable a specific tool output compressor")
-    .argument("<compressor>", "json or log")
+    .argument("<compressor>", "json, log, or shell")
     .argument("<state>", "enable or disable")
     .action((compressor: string, state: string) => {
-      if (!["json", "log"].includes(compressor)) {
+      if (!["json", "log", "shell"].includes(compressor)) {
         throw new Error(`Invalid compression compressor: ${compressor}`);
       }
       if (!["enable", "disable"].includes(state)) {
@@ -540,7 +550,7 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
         io,
         setCompressionCompressorEnabled(
           cachelaneConfigPath(env),
-          compressor as "json" | "log",
+          compressor as "json" | "log" | "shell",
           state === "enable",
         ),
       );
@@ -653,8 +663,29 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
 
   program
     .command("install")
-    .description("Register CacheLane MCP and hook integration")
-    .action(() => {
+    .description("Register CacheLane integration for a target tool")
+    .option("--target <name>", "Install target: claude-code (default) or aider", "claude-code")
+    .action((cmd: { target?: string }) => {
+      const target = cmd.target ?? "claude-code";
+      if (target === "aider") {
+        // Aider reads its API base from the OPENAI_API_BASE process env var.
+        // We don't write Aider config files — emit the redirect instruction so
+        // the user can export it into their environment.
+        const config = loadConfig(cachelaneConfigPath(env));
+        const port = config.proxy.port;
+        io.stdout(
+          jsonLine({
+            target: aiderTarget.name,
+            redirect_mechanism: aiderTarget.redirectMechanism,
+            env_var: aiderTarget.envVars[0],
+            instruction: `${aiderTarget.envVars[0]}=http://127.0.0.1:${port}/v1`,
+          }),
+        );
+        return;
+      }
+      if (target !== "claude-code") {
+        throw new Error(`Unknown install target: ${target}`);
+      }
       io.stdout(jsonLine(installCachelane(env)));
     });
 

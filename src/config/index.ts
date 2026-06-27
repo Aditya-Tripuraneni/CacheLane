@@ -70,8 +70,12 @@ const configSchema = z.object({
         .object({
           json: z.boolean().default(DEFAULT_CONFIG.compression.compressors.json),
           log: z.boolean().default(DEFAULT_CONFIG.compression.compressors.log),
+          shell: z.boolean().default(DEFAULT_CONFIG.compression.compressors.shell),
         })
         .default(DEFAULT_CONFIG.compression.compressors),
+      shell_profiles: z
+        .record(z.string(), z.boolean())
+        .default(DEFAULT_CONFIG.compression.shell_profiles ?? {}),
       retention: z
         .object({
           enabled: z.boolean().default(DEFAULT_CONFIG.compression.retention.enabled),

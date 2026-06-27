@@ -6,6 +6,7 @@ describe("compression registry", () => {
   it("returns default compressors in deterministic priority order", () => {
     const registry = createDefaultRegistry();
     expect(registry.map((compressor) => compressor.id)).toEqual([
+      "shell",
       "json",
       "log",
       "passthrough",
@@ -62,5 +63,30 @@ describe("compression registry", () => {
     expect(result.content).toBe('{"a":1}');
     expect(result.content_type).toBe("passthrough");
     expect(result.compressor_id).toBe("passthrough");
+  });
+});
+
+describe("shell routing precedence", () => {
+  it("routes a git-status output to the shell compressor when a command is present", () => {
+    const out = routeCompression({
+      tool_use_id: "t1",
+      content: "On branch main\nUntracked files:\n\tsrc/c.ts",
+      mode: "balanced",
+      json_max_array_items: 20,
+      command: "git status",
+    });
+    expect(out.compressor_id).toBe("shell");
+    expect(out.content_type).toBe("shell");
+  });
+
+  it("falls through to log/passthrough when no command matches a profile", () => {
+    const out = routeCompression({
+      tool_use_id: "t1",
+      content: "plain text output",
+      mode: "balanced",
+      json_max_array_items: 20,
+      command: "cowsay",
+    });
+    expect(out.compressor_id).not.toBe("shell");
   });
 });

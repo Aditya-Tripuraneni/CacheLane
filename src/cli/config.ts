@@ -108,7 +108,7 @@ export function setCompressionRetentionEnabled(
 
 export function setCompressionCompressorEnabled(
   configPath: string,
-  compressor: "json" | "log",
+  compressor: "json" | "log" | "shell",
   enabled: boolean,
 ): CachelaneConfig {
   return updateConfig(configPath, (raw) => {

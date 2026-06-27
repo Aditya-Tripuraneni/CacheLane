@@ -196,6 +196,7 @@ describe("materializePrunedBlocks", () => {
           volatility: "VOLATILE",
           is_pinned: false,
           refetch_handle: "tool:read:src/auth.ts",
+          token_count: 0,
         },
       ],
     });
@@ -259,6 +260,7 @@ describe("materializePrunedBlocks", () => {
           volatility: "VOLATILE",
           is_pinned: false,
           refetch_handle: "tool:read:src/auth.ts",
+          token_count: 0,
         },
       ],
     });

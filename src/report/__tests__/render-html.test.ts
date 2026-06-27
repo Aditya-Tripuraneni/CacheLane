@@ -15,7 +15,11 @@ const data: ReportData = {
     savings_ratio: 0.573, pipeline_fallback_turns: 0,
     pruner_counts: { pruned_blocks: 0, turns_with_pruning: 0 },
     keepalive_counts: { pings: 0, turns_with_keepalive: 0 },
-    compression_counts: { compressed_blocks: 0, tokens_saved: 0 },
+    compression_counts: {
+      compressed_blocks: 2,
+      tokens_saved: 150,
+      by_profile: [{ profile_id: "git-status", tokens_saved: 150, compressed_blocks: 2 }],
+    },
   },
   turns: [
     { turn_number: 1, model: "m", input_tokens: 100, cache_read_tokens: 0, cache_creation_tokens: 0,
@@ -78,6 +82,12 @@ describe("renderReportHtml", () => {
     expect(html).toContain('id="p-totals"');
     expect(html).toContain('id="p-scenarios"');
     expect(html).toContain("read-summarize-file");
+  });
+
+  it("renders per-profile compression savings", () => {
+    const html = renderReportHtml(data);
+    expect(html).toContain("git-status");
+    expect(html).toContain("150");
   });
 
   it("never leaks content (there is none to leak)", () => {

@@ -120,7 +120,7 @@ function helpText(version: string): string {
     ["enable / disable", "Toggle K-pruning"],
     ["enable-compression / disable-compression", "Toggle tool-output compression"],
     ["compression-mode", "Set compression mode"],
-    ["compression-compressor", "Toggle JSON or log compression"],
+    ["compression-compressor", "Toggle JSON, log, or shell compression"],
     ["compression-retention", "Toggle retrievable original retention"],
     ["exclude-compression", "Exclude tool outputs from compression"],
     ["doctor", "Check installation health"],

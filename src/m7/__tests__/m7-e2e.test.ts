@@ -82,6 +82,7 @@ function seedFixture(db: CachelaneDb): void {
         volatility: "VOLATILE",
         is_pinned: false,
         has_refetch_handle: true,
+        token_count: 250,
       },
     ],
     region_metadata: {

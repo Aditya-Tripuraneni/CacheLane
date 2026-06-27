@@ -26,6 +26,7 @@ describe("formatStats", () => {
       compression_counts: {
         compressed_blocks: 0,
         tokens_saved: 0,
+        by_profile: [],
       },
     };
 

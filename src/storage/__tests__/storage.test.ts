@@ -205,11 +205,13 @@ describe("openDatabase", () => {
       session_id: "sess-1",
       turn_number: 1,
       model: "claude-opus-4-7",
+      provider: "anthropic",
       input_tokens: 200,
       output_tokens: 80,
       cache_creation_5m_tokens: 1000,
       cache_creation_1h_tokens: 0,
       cache_read_tokens: 500,
+      cache_write_tokens: 1000,
       effective_cost_units: 1500,
       prefix_breakpoint_hash: "c".repeat(64),
       middle_breakpoint_hash: null,
@@ -222,6 +224,8 @@ describe("openDatabase", () => {
     expect(turn).not.toBeNull();
     expect(turn!.turn_number).toBe(1);
     expect(turn!.model).toBe("claude-opus-4-7");
+    expect(turn!.provider).toBe("anthropic");
+    expect(turn!.cache_write_tokens).toBe(1000);
     expect(turn!.cache_creation_5m_tokens).toBe(1000);
     expect(turn!.cache_creation_1h_tokens).toBe(0);
     expect(turn!.cache_read_tokens).toBe(500);
@@ -248,11 +252,13 @@ describe("openDatabase", () => {
       session_id: "sess-1",
       turn_number: 3,
       model: "claude-opus-4-7",
+      provider: "anthropic",
       input_tokens: 100,
       output_tokens: 0,
       cache_creation_5m_tokens: 0,
       cache_creation_1h_tokens: 0,
       cache_read_tokens: 0,
+      cache_write_tokens: 0,
       effective_cost_units: 100,
       prefix_breakpoint_hash: null,
       middle_breakpoint_hash: null,
@@ -298,6 +304,7 @@ describe("openDatabase", () => {
           volatility: "VOLATILE",
           is_pinned: false,
           has_refetch_handle: true,
+          token_count: 100,
         },
       ],
       region_metadata: {
@@ -334,7 +341,9 @@ describe("openDatabase", () => {
     const now = Date.now();
     const baseTurn = {
       model: "claude-opus-4-7",
+      provider: "anthropic",
       output_tokens: 0,
+      cache_write_tokens: 0,
       prefix_breakpoint_hash: null,
       middle_breakpoint_hash: null,
       created_at: now,
@@ -413,6 +422,7 @@ describe("openDatabase", () => {
       "01HZXQ5K0000000000000003",
       "view:auth.py:1-50",
       "Read auth.py:1-50 (800 tokens elided)",
+      10,
       now + 2000
     );
 
@@ -452,9 +462,9 @@ describe("openDatabase", () => {
     }
 
     db.markStubs([
-      { id: "BS1", workspace_id: ws, session_id: sess, refetchHandle: "view:BS1.ts:1-10", stubSummary: "BS1 stub", updatedAt: NOW + 1 },
-      { id: "BS2", workspace_id: ws, session_id: sess, refetchHandle: "view:BS2.ts:1-10", stubSummary: "BS2 stub", updatedAt: NOW + 1 },
-      { id: "BS3", workspace_id: ws, session_id: sess, refetchHandle: "view:BS3.ts:1-10", stubSummary: "BS3 stub", updatedAt: NOW + 1 },
+      { id: "BS1", workspace_id: ws, session_id: sess, refetchHandle: "view:BS1.ts:1-10", stubSummary: "BS1 stub", tokenCount: 10, updatedAt: NOW + 1 },
+      { id: "BS2", workspace_id: ws, session_id: sess, refetchHandle: "view:BS2.ts:1-10", stubSummary: "BS2 stub", tokenCount: 10, updatedAt: NOW + 1 },
+      { id: "BS3", workspace_id: ws, session_id: sess, refetchHandle: "view:BS3.ts:1-10", stubSummary: "BS3 stub", tokenCount: 10, updatedAt: NOW + 1 },
     ]);
 
     for (const id of ["BS1", "BS2", "BS3"]) {
@@ -616,11 +626,13 @@ describe("openDatabase", () => {
       session_id: "sess-1",
       turn_number: 1,
       model: "claude-opus-4-7",
+      provider: "anthropic",
       input_tokens: 100,
       output_tokens: 20,
       cache_creation_5m_tokens: 0,
       cache_creation_1h_tokens: 0,
       cache_read_tokens: 0,
+      cache_write_tokens: 0,
       effective_cost_units: 100,
       prefix_breakpoint_hash: null,
       middle_breakpoint_hash: null,
@@ -677,11 +689,13 @@ describe("openDatabase", () => {
       session_id: "sess-1",
       turn_number: 1,
       model: "claude-opus-4-7",
+      provider: "anthropic",
       input_tokens: 100,
       output_tokens: 20,
       cache_creation_5m_tokens: 0,
       cache_creation_1h_tokens: 0,
       cache_read_tokens: 0,
+      cache_write_tokens: 0,
       effective_cost_units: 100,
       prefix_breakpoint_hash: null,
       middle_breakpoint_hash: null,

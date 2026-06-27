@@ -256,11 +256,13 @@ describe("Migrations", () => {
         session_id: "sess-1",
         turn_number: 2,
         model: "model-x",
+        provider: "anthropic",
         input_tokens: 10,
         output_tokens: 20,
         cache_creation_5m_tokens: 0,
         cache_creation_1h_tokens: 0,
         cache_read_tokens: 0,
+        cache_write_tokens: 0,
         effective_cost_units: 100,
         prefix_breakpoint_hash: null,
         middle_breakpoint_hash: null,
@@ -274,6 +276,93 @@ describe("Migrations", () => {
       const turn2 = cachelaneDb.prepare("SELECT * FROM turns WHERE id = 'test-turn-2'").get() as Record<string, unknown>;
       expect(turn2.signals).toBe('["test_signal"]');
       expect(turn2.request_mutated).toBe(1);
+
+      cachelaneDb.close();
+    });
+  });
+
+  describe("migration 011 — provider + neutral cache columns", () => {
+    it("adds provider and cache_write_tokens to turns and backfills the neutral total", () => {
+      const dbPath = path.join(tmpDir, "test.db");
+
+      // Build a pre-011 database: apply 001..010 manually, then insert a turn
+      // carrying tiered cache-creation values so we can assert the backfill.
+      const db = new Database(dbPath);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+          id TEXT PRIMARY KEY,
+          applied_at INTEGER NOT NULL
+        )
+      `);
+      const preFiles = fs
+        .readdirSync(MIGRATION_DIR)
+        .filter((f) => f.endsWith(".sql") && f < "011")
+        .sort();
+      for (const file of preFiles) {
+        db.exec(fs.readFileSync(path.join(MIGRATION_DIR, file), "utf-8"));
+        db.prepare("INSERT INTO schema_migrations (id, applied_at) VALUES (?, ?)").run(
+          path.basename(file, ".sql"),
+          Date.now(),
+        );
+      }
+      db.prepare(
+        `INSERT INTO turns (id, workspace_id, session_id, turn_number, model,
+           input_tokens, output_tokens, cache_creation_5m_tokens, cache_creation_1h_tokens,
+           cache_read_tokens, effective_cost_units, created_at)
+         VALUES ('t1','ws','s',1,'claude', 10, 5, 30, 100, 0, 100, 123)`,
+      ).run();
+      db.close();
+
+      // openDatabase runs the remaining migrations, including 011.
+      const cachelaneDb = openDatabase(dbPath);
+
+      const cols = (cachelaneDb.pragma("table_info(turns)") as { name: string }[]).map((c) => c.name);
+      expect(cols).toContain("provider");
+      expect(cols).toContain("cache_write_tokens");
+      expect(cols).toContain("cache_read_tokens");
+
+      const row = cachelaneDb
+        .prepare("SELECT provider, cache_write_tokens FROM turns WHERE id = 't1'")
+        .get() as { provider: string; cache_write_tokens: number };
+      expect(row.provider).toBe("anthropic");
+      expect(row.cache_write_tokens).toBe(130); // 30 (5m) + 100 (1h) backfilled
+
+      cachelaneDb.close();
+    });
+
+    it("persists provider + cache_write_tokens written through insertTurn", () => {
+      // Regression: migration 011 added provider/cache_write_tokens, but the
+      // write path defaulted every turn to provider='anthropic'/0. A turn
+      // recorded through insertTurn must round-trip the supplied values.
+      const dbPath = path.join(tmpDir, "test.db");
+      const cachelaneDb = openDatabase(dbPath);
+
+      cachelaneDb.insertTurn({
+        id: "turn-openai-1",
+        workspace_id: "ws-1",
+        session_id: "sess-1",
+        turn_number: 1,
+        model: "gpt-5",
+        provider: "openai-chat",
+        input_tokens: 50,
+        output_tokens: 10,
+        cache_creation_5m_tokens: 0,
+        cache_creation_1h_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        effective_cost_units: 60,
+        prefix_breakpoint_hash: null,
+        middle_breakpoint_hash: null,
+        pruned_blocks_count: 0,
+        keepalive_pings_since_last_turn: 0,
+        created_at: 123456791,
+      });
+
+      const row = cachelaneDb
+        .prepare("SELECT provider, cache_write_tokens FROM turns WHERE id = 'turn-openai-1'")
+        .get() as { provider: string; cache_write_tokens: number };
+      expect(row.provider).toBe("openai-chat");
+      expect(row.cache_write_tokens).toBe(0);
 
       cachelaneDb.close();
     });

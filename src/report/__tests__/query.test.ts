@@ -21,8 +21,9 @@ function seedTurn(turnNumber: number, input: number, cacheRead: number): void {
   const turnId = `t-${turnNumber}`;
   db.insertTurn({
     id: turnId, workspace_id: "ws", session_id: "s1", turn_number: turnNumber,
-    model: "claude-opus-4-7", input_tokens: input, output_tokens: 10,
+    model: "claude-opus-4-7", provider: "anthropic", input_tokens: input, output_tokens: 10,
     cache_creation_5m_tokens: 0, cache_creation_1h_tokens: 0, cache_read_tokens: cacheRead,
+    cache_write_tokens: 0,
     effective_cost_units: input + 0.1 * cacheRead,
     prefix_breakpoint_hash: "abc", middle_breakpoint_hash: null,
     pruned_blocks_count: 0, keepalive_pings_since_last_turn: 0,
