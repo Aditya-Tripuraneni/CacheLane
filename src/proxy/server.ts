@@ -15,7 +15,7 @@ import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
 import aws4 from "aws4";
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
-import { countTokens } from "../tokenizer/index.js";
+import { countCompressionTokens } from "../compressor/token-accounting.js";
 import { reconcileTurnCost } from "../reconciler/index.js";
 
 const tokenCache = new Map<string, number>();
@@ -935,7 +935,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
             
             let tokenCount = tokenCache.get(contentHash);
             if (tokenCount === undefined) {
-              tokenCount = countTokens(contentStr, opts.model);
+              tokenCount = countCompressionTokens(contentStr, opts.model);
               tokenCache.set(contentHash, tokenCount);
             }
             
