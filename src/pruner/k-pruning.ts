@@ -1,6 +1,7 @@
 import type { CachelaneDb } from "../storage/index.js";
 import type { PruneDecision, PruneExpiredBlocksParams, PruneResult } from "./types.js";
 import { makeStubSummary, formatStubText } from "./stubs.js";
+import { isExpandableBlockId } from "./tools.js";
 import { countTokens } from "../tokenizer/index.js";
 
 export function pruneExpiredBlocks(
@@ -16,12 +17,25 @@ export function pruneExpiredBlocks(
   }
 
   const nowMs = params.now_ms ?? Date.now();
-  const rows = db.getPrunableBlocks({
+  const allRows = db.getPrunableBlocks({
     workspace_id: params.workspace_id,
     session_id: params.session_id,
     k: params.k,
     current_turn: params.current_turn,
   });
+
+  // Fail-open gate: only prune a block that can round-trip through expandStub.
+  // A stub the model can't expand is worse than the original — it is unreadable
+  // AND invites confabulation. Lossless-or-nothing: leave unexpandable blocks live.
+  const rows = allRows.filter((row) =>
+    isExpandableBlockId(db, params.workspace_id, params.session_id, row.id),
+  );
+  const skipped = allRows.length - rows.length;
+  if (skipped > 0) {
+    console.warn("[cachelane] pruner: skipped unexpandable blocks (kept live)", {
+      count: skipped,
+    });
+  }
 
   // Build the full decision list first (no DB writes yet)
   const stubItems = rows.map((row) => {

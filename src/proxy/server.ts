@@ -1,5 +1,6 @@
 import http from "node:http";
 import https from "node:https";
+import tls from "node:tls";
 import { randomUUID, createHash } from "node:crypto";
 import { loadConfig, defaultWorkspaceId } from "../config/index.js";
 import { openDatabase, calculateEffectiveCostUnits, type CachelaneDb } from "../storage/index.js";
@@ -15,7 +16,7 @@ import type { UnclassifiedBlock } from "../classifier/index.js";
 import type { Classification } from "../classifier/index.js";
 import aws4 from "aws4";
 import { defaultProvider } from "@aws-sdk/credential-provider-node";
-import { countTokens } from "../tokenizer/index.js";
+import { countCompressionTokens } from "../compressor/token-accounting.js";
 import { reconcileTurnCost } from "../reconciler/index.js";
 
 const tokenCache = new Map<string, number>();
@@ -274,6 +275,14 @@ function makeRequest(
   return upstream.ssl ? https.request(opts, cb) : http.request(opts, cb);
 }
 
+/** Returns the configured forward-proxy URL for this upstream, or undefined. */
+export function proxyUrlFor(upstream: UpstreamTarget): string | undefined {
+  const env = process.env;
+  return upstream.ssl
+    ? env.HTTPS_PROXY ?? env.https_proxy
+    : env.HTTP_PROXY ?? env.http_proxy;
+}
+
 function forwardUpstream(
   upstream: UpstreamTarget,
   method: string,
@@ -282,25 +291,63 @@ function forwardUpstream(
   body: Buffer,
   res: http.ServerResponse,
 ): void {
-  const upstreamReq = makeRequest(
-    upstream,
-    { path: buildUpstreamPath(upstream, path), method, headers: { ...headers, host: upstream.host } },
-    (upstreamRes) => {
-      res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers as http.OutgoingHttpHeaders);
-      upstreamRes.pipe(res);
-    },
-  );
-
-  upstreamReq.on("error", (err) => {
+  const onError = (err: Error): void => {
     // Avoid crashing the proxy process if upstream connection fails
     if (!res.headersSent) {
       res.writeHead(502);
       res.end(JSON.stringify({ error: { message: `Bad Gateway: ${err.message}` } }));
     }
-  });
+  };
 
-  upstreamReq.write(body);
-  upstreamReq.end();
+  const send = (extraOpts: http.RequestOptions): void => {
+    const upstreamReq = makeRequest(
+      upstream,
+      {
+        ...extraOpts,
+        path: buildUpstreamPath(upstream, path),
+        method,
+        headers: { ...headers, host: upstream.host },
+      },
+      (upstreamRes) => {
+        res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers as http.OutgoingHttpHeaders);
+        upstreamRes.pipe(res);
+      },
+    );
+    upstreamReq.on("error", onError);
+    upstreamReq.write(body);
+    upstreamReq.end();
+  };
+
+  const proxy = proxyUrlFor(upstream);
+  // ponytail: only HTTPS upstreams tunnel via CONNECT (the Anthropic path). A plain-HTTP
+  // upstream through a forward proxy is unsupported — add absolute-URI forwarding if needed.
+  if (proxy && upstream.ssl) {
+    const pu = new URL(proxy);
+    const authority = `${upstream.host}:${upstream.port}`;
+    const connectReq = http.request({
+      host: pu.hostname,
+      port: Number(pu.port) || 80,
+      method: "CONNECT",
+      path: authority,
+      headers: { host: authority },
+    });
+    connectReq.on("connect", (connRes, socket) => {
+      if (connRes.statusCode !== 200) {
+        socket.destroy();
+        onError(new Error(`proxy CONNECT failed: ${connRes.statusCode}`));
+        return;
+      }
+      send({
+        agent: false,
+        createConnection: () => tls.connect({ socket, servername: upstream.host }),
+      });
+    });
+    connectReq.on("error", onError);
+    connectReq.end();
+    return;
+  }
+
+  send({});
 }
 
 /** Strip headers that would cause upstream to respond in an encoding we can't parse. */
@@ -935,7 +982,7 @@ function extractAndInsertToolResults(body: Buffer, opts: RecordOptions): void {
             
             let tokenCount = tokenCache.get(contentHash);
             if (tokenCount === undefined) {
-              tokenCount = countTokens(contentStr, opts.model);
+              tokenCount = countCompressionTokens(contentStr, opts.model);
               tokenCache.set(contentHash, tokenCount);
             }
             

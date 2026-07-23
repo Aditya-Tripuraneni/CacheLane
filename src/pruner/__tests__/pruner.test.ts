@@ -150,7 +150,7 @@ describe("pruneExpiredBlocks", () => {
     };
 
     expect(formatStubText(decision)).toBe(
-      "[stub:01KPRUNE] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KPRUNE)",
+      "[stub:01KPRUNE0000000000000007] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KPRUNE0000000000000007)",
     );
   });
 });
@@ -208,7 +208,7 @@ describe("materializePrunedBlocks", () => {
     expect(out.messages[0]?.content[0]).toEqual({ type: "text", text: "keep-0" });
     expect(out.messages[0]?.content[1]).toEqual({
       type: "text",
-      text: "[stub:01KMATRL] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KMATRL)",
+      text: "[stub:01KMATRL000000000000001] tool_output tool:read:src/auth.ts (250 tokens elided) | refetch via cachelane_expand(block_id=01KMATRL000000000000001)",
     });
     expect(out.messages[1]?.content[0]).toEqual({ type: "text", text: "keep-1" });
     expect(request.messages[0]?.content[1]).toEqual({
@@ -304,7 +304,7 @@ describe("materializePrunedBlocks", () => {
 });
 
 describe("expandStub", () => {
-  it("accepts an 8-character block prefix and returns the trusted refetch request", () => {
+  it("accepts a full block id and returns the trusted refetch request", () => {
     insertBlock("01KEXPAND000000000000001", {
       is_stub: true,
       unused_turns: 3,
@@ -315,7 +315,7 @@ describe("expandStub", () => {
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KEXPAN",
+      block_id: "01KEXPAND000000000000001",
       turn_number: 6,
       updated_at: 1_715_000_006_000,
     });
@@ -333,34 +333,11 @@ describe("expandStub", () => {
     expect(db.getBlock("01KEXPAND000000000000001")?.restored_at_turn).toBe(6);
   });
 
-  it("fails deterministically for ambiguous prefixes", () => {
-    insertBlock("01KAMBIG000000000000001", {
-      is_stub: true,
-      stub_summary: "one",
-    });
-    insertBlock("01KAMBIG000000000000002", {
-      is_stub: true,
-      stub_summary: "two",
-    });
-
-    const result = expandStub(db, {
-      workspace_id: "ws-1",
-      session_id: "sess-1",
-      block_id: "01KAMBIG",
-      turn_number: 6,
-    });
-
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error.code).toBe("ambiguous_prefix");
-    }
-  });
-
   it("fails deterministically for missing blocks", () => {
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KMISSI",
+      block_id: "01KMISSING00000000000001",
       turn_number: 6,
     });
 
@@ -399,7 +376,7 @@ describe("expandStub", () => {
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KNOSTB",
+      block_id: "01KNOSTB000000000000001",
       turn_number: 6,
     });
 
@@ -419,7 +396,7 @@ describe("expandStub", () => {
     const result = expandStub(db, {
       workspace_id: "ws-1",
       session_id: "sess-1",
-      block_id: "01KNOHND",
+      block_id: "01KNOHND000000000000001",
       turn_number: 6,
     });
 

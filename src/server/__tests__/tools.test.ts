@@ -211,26 +211,20 @@ describe("MCP tool handlers", () => {
     insertTurn("turn-1", 5);
     insertBlock("01EXPAND00000000000001");
     insertBlock("01MISSAA00000000000001", { is_stub: false });
-    insertBlock("01AMBIG100000000000001");
-    insertBlock("01AMBIG100000000000002");
 
-    expect(handleExpandTool(context(), { block_id: "01EXPAND" })).toMatchObject({
+    expect(handleExpandTool(context(), { block_id: "01EXPAND00000000000001" })).toMatchObject({
       ok: true,
       block_id: "01EXPAND00000000000001",
     });
-    expect(handleExpandTool(context(), { block_id: "short" })).toMatchObject({
+    expect(handleExpandTool(context(), { block_id: "bad%id" })).toMatchObject({
       ok: false,
       error: { code: "invalid_block_id" },
     });
-    expect(handleExpandTool(context(), { block_id: "01ABSENT" })).toMatchObject({
+    expect(handleExpandTool(context(), { block_id: "01ABSENT00000000000001" })).toMatchObject({
       ok: false,
       error: { code: "missing_block" },
     });
-    expect(handleExpandTool(context(), { block_id: "01AMBIG1" })).toMatchObject({
-      ok: false,
-      error: { code: "ambiguous_prefix" },
-    });
-    expect(handleExpandTool(context(), { block_id: "01MISSAA" })).toMatchObject({
+    expect(handleExpandTool(context(), { block_id: "01MISSAA00000000000001" })).toMatchObject({
       ok: false,
       error: { code: "not_stub" },
     });

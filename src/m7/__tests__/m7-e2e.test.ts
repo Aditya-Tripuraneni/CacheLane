@@ -140,7 +140,7 @@ describe("M7 E2E fixture", () => {
         workspace_id: fixture.workspace_id,
         session_id: fixture.session_id,
       },
-      { block_id: fixture.block.id.slice(0, 8) },
+      { block_id: fixture.block.id },
     );
     db.close();
 

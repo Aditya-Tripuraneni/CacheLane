@@ -17,7 +17,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { startProxy, createProxyServer } from "../server.js";
+import { startProxy, createProxyServer, proxyUrlFor } from "../server.js";
 import { DEFAULT_CONFIG } from "../../config/defaults.js";
 import { CacheStateTracker } from "../../orchestrator/index.js";
 import { openDatabase } from "../../storage/index.js";
@@ -1082,5 +1082,37 @@ describe("proxy pipeline integration", () => {
         db.close();
       }
     });
+  });
+});
+
+describe("proxyUrlFor", () => {
+  const saved = { ...process.env };
+  afterEach(() => {
+    process.env = { ...saved };
+  });
+
+  const ssl = { host: "api.anthropic.com", port: 443, ssl: true, path_prefix: "" };
+  const plain = { host: "localhost", port: 8080, ssl: false, path_prefix: "" };
+
+  it("uses HTTPS_PROXY for ssl upstreams", () => {
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    process.env.HTTPS_PROXY = "http://alpaca:3128";
+    expect(proxyUrlFor(ssl)).toBe("http://alpaca:3128");
+  });
+
+  it("uses HTTP_PROXY for non-ssl upstreams", () => {
+    delete process.env.HTTPS_PROXY;
+    delete process.env.https_proxy;
+    process.env.HTTP_PROXY = "http://alpaca:3128";
+    expect(proxyUrlFor(plain)).toBe("http://alpaca:3128");
+  });
+
+  it("returns undefined when no proxy env is set", () => {
+    delete process.env.HTTPS_PROXY;
+    delete process.env.https_proxy;
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    expect(proxyUrlFor(ssl)).toBeUndefined();
   });
 });
