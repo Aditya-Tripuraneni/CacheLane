@@ -12,6 +12,8 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:audit": "tsup --config packages/audit/tsup.config.ts",
+    "typecheck:audit": "tsc -p packages/audit/tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",
