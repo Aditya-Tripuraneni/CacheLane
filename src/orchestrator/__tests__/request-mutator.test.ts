@@ -478,4 +478,40 @@ describe("mutateRequest", () => {
       expect(last.at(-1)?.cache_control).toBeUndefined();
     });
   });
+
+  // Claude Code sends 1h markers on subscriptions. Downgrading them to 5m makes every
+  // pause longer than 5 minutes a full cache rebuild for proxy users.
+  describe("client cache TTL", () => {
+    const oneHour = { type: "ephemeral", ttl: "1h" } as const;
+    const req1h: AnthropicMessagesRequest = {
+      ...baseRequest,
+      system: [
+        { type: "text", text: "You are Claude." },
+        { type: "text", text: "CLAUDE.md content here.", cache_control: oneHour },
+      ],
+      messages: [
+        { role: "user", content: [{ type: "text", text: "Read foo.ts" }] },
+        { role: "assistant", content: [{ type: "text", text: "Sure." }] },
+        { role: "user", content: [{ type: "text", text: "Now refactor.", cache_control: oneHour }] },
+      ],
+    };
+    const lastMarker = (out: AnthropicMessagesRequest, i: number) =>
+      (out.messages[i]!.content as { cache_control?: unknown }[]).at(-1)?.cache_control;
+
+    it("keeps the client's 1h tier on the tail and middle markers", () => {
+      const out = mutateRequest(req1h, { middle_end_in_messages: 2 }, breakpoints);
+      expect(lastMarker(out, 2)).toEqual(oneHour);
+      expect(lastMarker(out, 1)).toEqual(oneHour);
+    });
+
+    it("raises the prefix to 1h so no 1h marker follows a 5m one", () => {
+      const out = mutateRequest(req1h, { middle_end_in_messages: null }, breakpoints, "5m");
+      expect(out.system?.at(-1)?.cache_control).toEqual(oneHour);
+    });
+
+    it("keeps 5m markers when the client sent 5m", () => {
+      const out = mutateRequest(baseRequest, { middle_end_in_messages: null }, breakpoints);
+      expect(lastMarker(out, 2)).toEqual({ type: "ephemeral", ttl: "5m" });
+    });
+  });
 });

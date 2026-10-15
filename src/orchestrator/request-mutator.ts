@@ -17,7 +17,15 @@ function isToolResult(c: AnthropicMessageContent): c is AnthropicToolResultConte
   return c.type === "tool_result";
 }
 
-const MIDDLE_MARKER: AnthropicCacheControl = Object.freeze({ type: "ephemeral", ttl: "5m" });
+/** True if the client marked any block with the 1h tier (Claude Code does on subscriptions). */
+function clientUsesOneHour(req: AnthropicMessagesRequest): boolean {
+  const blocks: { cache_control?: AnthropicCacheControl }[] = [
+    ...(req.system ?? []),
+    ...(req.tools ?? []),
+    ...req.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
+  ];
+  return blocks.some((b) => b.cache_control?.ttl === "1h");
+}
 
 export function mutateRequest(
   originalRequest: AnthropicMessagesRequest,
@@ -25,9 +33,13 @@ export function mutateRequest(
   breakpoints: Breakpoints,
   prefixTtl: PrefixState["ttl_class"] = "5m",
 ): AnthropicMessagesRequest {
+  // Keep the client's cache tier rather than downgrading 1h to 5m. The prefix is raised
+  // to match, since Anthropic rejects a 1h marker placed after a 5m one.
+  const clientTtl = clientUsesOneHour(originalRequest) ? "1h" : "5m";
+  const conversationMarker: AnthropicCacheControl = { type: "ephemeral", ttl: clientTtl };
   const prefixMarker: AnthropicCacheControl = {
     type: "ephemeral",
-    ttl: prefixTtl,
+    ttl: prefixTtl === "1h" || clientTtl === "1h" ? "1h" : "5m",
   };
   // Strip ALL existing cache_control markers before placing CacheLane's own.
   // Claude Code pre-populates its own 5m markers; leaving them in creates
@@ -112,7 +124,7 @@ export function mutateRequest(
     const msg = out.messages[lastSemiIdx];
     if (msg && Array.isArray(msg.content) && msg.content.length > 0) {
       const lastContent = msg.content.at(-1);
-      if (lastContent) lastContent.cache_control = MIDDLE_MARKER;
+      if (lastContent) lastContent.cache_control = conversationMarker;
     }
   }
 
@@ -129,7 +141,7 @@ export function mutateRequest(
     tailType !== "redacted_thinking" &&
     !(tailBlock.type === "text" && !tailBlock.text)
   ) {
-    tailBlock.cache_control = MIDDLE_MARKER;
+    tailBlock.cache_control = conversationMarker;
   }
 
   return out;
