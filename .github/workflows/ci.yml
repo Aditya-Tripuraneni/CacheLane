@@ -38,6 +38,14 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Type-check audit package
+        run: npm run typecheck:audit
+
+      # plugin/bin/cachelane-audit.mjs is a committed build output that the
+      # Claude Code plugin runs directly; fail if it is stale vs. the source.
+      - name: Plugin bundle is up to date
+        run: npm run build:audit && git diff --exit-code plugin/bin/cachelane-audit.mjs
+
       - name: Recorded benchmark smoke
         run: npm run benchmark:recorded
 
