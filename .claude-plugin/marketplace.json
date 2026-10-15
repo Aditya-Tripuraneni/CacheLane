@@ -1,0 +1,14 @@
+{
+  "name": "cachelane",
+  "owner": {
+    "name": "CacheLane"
+  },
+  "description": "CacheLane plugins for Claude Code: cold-cache guard and token audit",
+  "plugins": [
+    {
+      "name": "cachelane",
+      "source": "./plugin",
+      "description": "Cold-cache guard and token audit for Claude Code"
+    }
+  ]
+}

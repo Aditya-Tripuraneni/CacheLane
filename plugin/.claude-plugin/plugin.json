@@ -1,0 +1,11 @@
+{
+  "name": "cachelane",
+  "version": "0.1.0",
+  "description": "Warns before a message rebuilds a large expired prompt cache, and audits where your input tokens went.",
+  "license": "Apache-2.0",
+  "repository": "https://github.com/Aditya-Tripuraneni/CacheLane",
+  "author": {
+    "name": "CacheLane",
+    "url": "https://github.com/Aditya-Tripuraneni/CacheLane"
+  }
+}
