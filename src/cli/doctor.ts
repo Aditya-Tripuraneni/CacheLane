@@ -3,7 +3,7 @@ import net from "node:net";
 import { loadConfig } from "../config/index.js";
 import { openDatabase } from "../storage/index.js";
 import { cachelaneConfigPath, cachelaneDbPath } from "./paths.js";
-import { installSurfaceStatus } from "./install.js";
+import { installSurfaceStatus, proxyInstalled } from "./install.js";
 
 export interface DoctorCheck {
   name: string;
@@ -66,16 +66,27 @@ export function runDoctor(env: NodeJS.ProcessEnv = process.env): DoctorReport {
   }
 
   const install = installSurfaceStatus(env);
-  checks.push({
-    name: "mcp",
-    ok: install.mcp_registered,
-    detail: install.mcp_registered ? "registered" : "not registered",
-  });
-  checks.push({
-    name: "hooks",
-    ok: install.hook_registered,
-    detail: install.hook_registered ? "registered" : "not registered",
-  });
+  let hasProxy = install.mcp_registered || install.hook_registered;
+  try {
+    hasProxy = hasProxy || proxyInstalled(env);
+  } catch {
+    // malformed settings.json is reported by the install path, not here
+  }
+  // The proxy is opt-in since 1.2.0, so its absence is not a failure.
+  if (hasProxy) {
+    checks.push({
+      name: "mcp",
+      ok: install.mcp_registered,
+      detail: install.mcp_registered ? "registered" : "not registered",
+    });
+    checks.push({
+      name: "hooks",
+      ok: install.hook_registered,
+      detail: install.hook_registered ? "registered" : "not registered",
+    });
+  } else {
+    checks.push({ name: "proxy", ok: true, detail: "not installed (optional): cachelane install --proxy" });
+  }
   checks.push({
     name: "data",
     ok: fs.existsSync(dbPath),
@@ -108,6 +119,12 @@ export function runDoctor(env: NodeJS.ProcessEnv = process.env): DoctorReport {
         : `chained → ${upstreamConfig.host}:${upstreamConfig.port} (${upstreamConfig.ssl ? "https" : "http"})`,
     });
   }
+
+  checks.push({
+    name: "audit",
+    ok: true,
+    detail: "npx cachelane-audit · guard: /plugin install cachelane@cachelane (marketplace Aditya-Tripuraneni/CacheLane)",
+  });
 
   return {
     ok: checks.every((check) => check.ok),

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import net from "node:net";
 import { runDoctor, probeUpstream, computeFallbackRate } from "../doctor.js";
+import { installCachelane } from "../install.js";
 
 let tmpDir: string;
 let env: NodeJS.ProcessEnv;
@@ -60,5 +61,23 @@ describe("computeFallbackRate", () => {
     expect(fallback_count).toBe(1);
     expect(total).toBe(3);
     expect(fraction).toBeCloseTo(1 / 3, 5);
+  });
+});
+
+describe("runDoctor without the proxy", () => {
+  it("reports the proxy as optional instead of failing mcp/hooks", () => {
+    const report = runDoctor(env);
+    expect(report.checks.some((c) => c.name === "mcp")).toBe(false);
+    expect(report.checks.find((c) => c.name === "proxy")?.detail).toContain("optional");
+    expect(report.ok).toBe(true);
+  });
+
+  it("points to the audit", () => {
+    expect(runDoctor(env).checks.find((c) => c.name === "audit")?.detail).toContain("npx cachelane-audit");
+  });
+
+  it("checks mcp and hooks after a proxy install", () => {
+    installCachelane(env);
+    expect(runDoctor(env).checks.find((c) => c.name === "mcp")?.ok).toBe(true);
   });
 });

@@ -424,10 +424,27 @@ describe("cachelane CLI", () => {
       "node",
       "config",
       "database",
+      "proxy",
+      "data",
+      "upstream",
+      "audit",
+      "fallback_rate",
+      "cache_reads",
+    ]);
+  });
+
+  it("doctor --json checks mcp and hooks once the proxy is installed", async () => {
+    await run(["install", "--proxy"]);
+    const report = JSON.parse(await run(["doctor", "--json"])) as { checks: { name: string }[] };
+    expect(report.checks.map((check) => check.name)).toEqual([
+      "node",
+      "config",
+      "database",
       "mcp",
       "hooks",
       "data",
       "upstream",
+      "audit",
       "fallback_rate",
       "cache_reads",
     ]);
