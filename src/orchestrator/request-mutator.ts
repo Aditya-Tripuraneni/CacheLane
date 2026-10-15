@@ -116,5 +116,21 @@ export function mutateRequest(
     }
   }
 
+  // Rolling tail breakpoint: replaces the one Claude Code put on the last block of
+  // the last message (stripped above), so prior history is read from cache each turn.
+  // Thinking blocks and empty text blocks cannot carry cache_control (thinking
+  // blocks are not in the content union but do arrive from Claude Code).
+  const tail = out.messages.at(-1)?.content;
+  const tailBlock = Array.isArray(tail) ? tail.at(-1) : undefined;
+  const tailType: string | undefined = tailBlock?.type;
+  if (
+    tailBlock &&
+    tailType !== "thinking" &&
+    tailType !== "redacted_thinking" &&
+    !(tailBlock.type === "text" && !tailBlock.text)
+  ) {
+    tailBlock.cache_control = MIDDLE_MARKER;
+  }
+
   return out;
 }
