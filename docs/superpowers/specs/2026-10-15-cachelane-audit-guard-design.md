@@ -31,7 +31,7 @@ Date: 2026-10-15 · Status: approved in brainstorm, pending spec review · Depen
 | `packages/audit/` | npm `cachelane-audit` | Node stdlib only, zero deps. `bin: cachelane-audit`. Exports `parseSession`, `classifyRebuilds`, `costOf`, `guardDecision`. |
 | `plugin/` | Claude Code plugin `cachelane` | `.claude-plugin/plugin.json`, `hooks/hooks.json` (UserPromptSubmit guard, Stop timestamp), `commands/audit.md`, bundled `bin/cachelane-audit.mjs` (built copy of `packages/audit`). |
 | `.claude-plugin/marketplace.json` (repo root) | marketplace entry | Lists the `cachelane` plugin so `/plugin marketplace add Aditya-Tripuraneni/CacheLane` works. |
-| root `cachelane` | npm `cachelane` 1.2.0 | Depends on `cachelane-audit`. Adds `cachelane audit` and `cachelane guard on|off`. The proxy becomes opt-in. |
+| root `cachelane` | npm `cachelane` 1.2.0 | Depends on `cachelane-audit`. Adds `cachelane audit` and `cachelane guard on|off`. The proxy becomes opt-in. Implemented in a second plan, after PR #40 merges. |
 
 Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audit.mjs`), never `npx`. That keeps them inside the 30 s UserPromptSubmit timeout.
 
@@ -66,10 +66,10 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
 **Cost (`costOf`)**
 - **Weighted units:**
   - input = 1.0
-  - read = 0.1 (0.05 for Opus 5.5 and Sonnet 5.5, 0.025 for Fable 5.1)
+  - read = the model's cache-read price / input price: 0.05 for Opus 5.5 ($0.20/$4), 0.025 for Fable 5.1 ($0.25/$10), 0.1 for Sonnet 5.5 ($0.20/$2) and the default
   - write = 1.25 for the 5m tier, 2.0 for the 1h tier
-- **Dollars:** units x base input price per model, from `prices.json`. Every dollar figure is labeled "at API price". Unknown model: show units only.
-- `prices.json` lives in the package and is updated by PR. It is never fetched at runtime.
+- **Dollars:** units x base input price per model, from `src/prices.ts`. Every dollar figure is labeled "at API price". Unknown model: show units only.
+- `src/prices.ts` holds Anthropic first-party list prices (cached 2026-10-06) and is updated by PR. It is never fetched at runtime.
 
 **Output (default terminal)**
 - Header: period, number of projects, number of sessions.
