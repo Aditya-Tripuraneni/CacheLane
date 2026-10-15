@@ -49,6 +49,30 @@ jobs:
       - name: Recorded benchmark smoke
         run: npm run benchmark:recorded
 
+  audit-node:
+    name: Audit CLI (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 22, 24]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # The committed bundle needs no install; run it on the fixtures and a hook payload.
+      - name: Audit and hook smoke
+        run: |
+          mkdir -p "$RUNNER_TEMP/claude/projects"
+          cp -r packages/audit/src/__tests__/fixtures "$RUNNER_TEMP/claude/projects/"
+          CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude" node plugin/bin/cachelane-audit.mjs --json \
+            | node -e 'const r = JSON.parse(require("fs").readFileSync(0, "utf8")); if (r.sessions !== 5) { console.error(r); process.exit(1); }'
+          echo '{"session_id":"x","transcript_path":"/nope"}' | node plugin/bin/cachelane-audit.mjs hook prompt
+
   doctor:
     name: Doctor smoke (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
