@@ -97,8 +97,8 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
    - the tier of the last write
 3. `context` = read + write + input of the last main-chain call.
 4. If `now - last > TTL` and `context >= threshold` (default 150_000, set with `cachelane guard threshold <n>`):
-   - If `sha256(session_id + prompt)` was blocked less than 2 min ago: allow, and clear the entry.
-   - Otherwise: block (`{"decision":"block","reason":...}`) and record the fingerprint.
+   - If this idle period was already warned (`warned[session_id] == last`): allow. One warning per break; Claude Code does not restore a blocked prompt, so retyping can take minutes.
+   - Otherwise: block (`{"decision":"block","reason":...}`) and set `warned[session_id] = last`.
 5. Any exception, a missing file, or more than 5 s elapsed: exit 0 (allow). The guard never blocks on its own failure.
 
 **Block message** (about 8 lines)
@@ -111,7 +111,7 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
   | `/compact` | context x 1.0 + ~20k summary x 5 (output) + ~89k post-compact context x write multiplier (labeled estimate). Shown as "costs more than continuing" when it does. 89k is the median of 12 real compactions. |
   | `/clear` | about 0, loses context |
 
-- "Re-send your message to continue anyway."
+- "Send your message again to continue; you are only warned once per break."
 
 **Toggle:** `cachelane guard off|on` writes `enabled` into `~/.cachelane/guard.json`. The plugin path can also be disabled with `/plugin disable`.
 
@@ -161,7 +161,7 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
 - **Tests:**
   - `classifyRebuilds`, table-driven (`describe.each`) over the fixtures.
   - `costOf` checks the multipliers per model.
-  - `guardDecision` takes an injected `now`, env and file reads: cold+large blocks; resubmit within 2 min allows; warm allows; small allows; corrupt guard.json allows.
+  - `guardDecision` takes an injected `now`, env and file reads: cold+large blocks; next prompt after a warning allows; a new response then a fresh break warns again; warm allows; small allows; corrupt guard.json allows.
 - **Packaging check:**
   - `npm pack` of `packages/audit` is under 100 KB.
   - Install has zero dependencies.

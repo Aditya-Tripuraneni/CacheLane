@@ -20,7 +20,7 @@ It reports:
 /plugin install cachelane@cachelane
 ```
 
-When you come back to a session whose cache has expired and whose context is large (150k tokens by default), the guard blocks your first message once. It shows what continuing, `/compact`, and `/clear` would cost. To proceed anyway, send the same message again within 2 minutes.
+When you come back to a session whose cache has expired and whose context is large (150k tokens by default), the guard blocks your first message once. It shows what continuing, `/compact`, and `/clear` would cost. Send your message again to proceed; you are only warned once per break.
 
 ```bash
 npx cachelane-audit guard off | on | status | threshold 200000

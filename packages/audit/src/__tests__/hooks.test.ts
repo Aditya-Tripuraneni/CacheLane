@@ -23,10 +23,16 @@ describe("promptHook", () => {
     expect(out.reason).toContain("went cold 2h 0m ago");
   });
 
-  it("allows the resubmitted prompt", () => {
+  it("allows the next prompt after a warning, whatever it says and however late", () => {
     const deps = setup(LAST + 2 * 3_600_000);
     promptHook(input(), deps);
-    expect(promptHook(input(), { ...deps, now: deps.now + 30_000 })).toBe("");
+    expect(promptHook(input("something else"), { ...deps, now: deps.now + 10 * 60_000 })).toBe("");
+  });
+
+  it("keeps the one-warning rule when the last response is over a week old", () => {
+    const deps = setup(LAST + 14 * 24 * 3_600_000);
+    promptHook(input(), deps);
+    expect(promptHook(input("something else"), { ...deps, now: deps.now + 60_000 })).toBe("");
   });
 
   it("uses the Stop timestamp as last activity", () => {

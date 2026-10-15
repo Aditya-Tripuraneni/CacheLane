@@ -6,7 +6,6 @@ import { homedir as homedir2 } from "os";
 import { join as join3, resolve } from "path";
 
 // packages/audit/src/guard.ts
-import { createHash } from "crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname } from "path";
 
@@ -86,7 +85,6 @@ function toDollars(unitCount, model) {
 
 // packages/audit/src/guard.ts
 var DEFAULT_THRESHOLD = 15e4;
-var RESUBMIT_WINDOW_MS = 12e4;
 var POST_COMPACT_TOKENS = 89e3;
 var SUMMARY_OUTPUT_TOKENS = 2e4;
 var OUTPUT_MULT = 5;
@@ -101,16 +99,14 @@ function loadState(path) {
       enabled: s.enabled !== false,
       threshold: typeof s.threshold === "number" ? s.threshold : DEFAULT_THRESHOLD,
       sessions: isRecord(s.sessions) ? s.sessions : {},
-      blocked: isRecord(s.blocked) ? s.blocked : {}
+      warned: isRecord(s.warned) ? s.warned : {}
     };
   } catch {
-    return { enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, blocked: {} };
+    return { enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, warned: {} };
   }
 }
 function saveState(path, s, now) {
-  for (const m of [s.sessions, s.blocked]) {
-    for (const [k, t] of Object.entries(m)) if (now - t > WEEK) delete m[k];
-  }
+  for (const [k, t] of Object.entries(s.sessions)) if (now - t > WEEK) delete s.sessions[k];
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(s));
 }
@@ -131,13 +127,8 @@ function guardDecision(i) {
   const idle = i.now - i.lastResponseAt;
   const context = contextOf(lastCall);
   if (idle <= i.ttlMs || context < state.threshold) return { action: "allow" };
-  const fp = createHash("sha256").update(`${i.sessionId}\0${i.prompt}`).digest("hex");
-  const blockedAt = state.blocked[fp];
-  if (blockedAt !== void 0 && i.now - blockedAt <= RESUBMIT_WINDOW_MS) {
-    delete state.blocked[fp];
-    return { action: "allow" };
-  }
-  state.blocked[fp] = i.now;
+  if (state.warned[i.sessionId] === i.lastResponseAt) return { action: "allow" };
+  state.warned[i.sessionId] = i.lastResponseAt;
   return { action: "block", reason: blockReason(context, idle, i.ttlMs, lastCall.model) };
 }
 function blockReason(context, idleMs, ttlMs, model) {
@@ -157,7 +148,7 @@ function blockReason(context, idleMs, ttlMs, model) {
     `  continue   rewrites ${k(context)} tokens at ${mult}x = ${k(cont)} units${money(cont)}`,
     compactLine,
     "  /clear     ~0 units, but drops the conversation",
-    "Re-send the same message within 2 minutes to continue anyway. Turn off with: cachelane-audit guard off"
+    "Send your message again to continue; you are only warned once per break. Turn off with: cachelane-audit guard off"
   ].join("\n");
 }
 
@@ -242,7 +233,6 @@ function promptHook(input, d) {
     ];
     const result = guardDecision({
       sessionId: input.session_id,
-      prompt: input.prompt ?? "",
       now: d.now,
       lastResponseAt: state.sessions[input.session_id] ?? lastCall?.ts,
       lastCall,
@@ -260,13 +250,14 @@ function stopHook(input, d) {
     if (!input.session_id) return;
     const state = loadState(d.statePath);
     state.sessions[input.session_id] = d.now;
+    delete state.warned[input.session_id];
     saveState(d.statePath, state, d.now);
   } catch {
   }
 }
 
 // packages/audit/src/report.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash } from "crypto";
 import { readdirSync, statSync } from "fs";
 import { join as join2 } from "path";
 var RECOMMEND = {
@@ -304,7 +295,7 @@ function findTranscripts(projectsDir, sinceMs, project) {
   return out;
 }
 function buildReport(sessions, baseUrlSet2, hidePaths = false) {
-  const name = (p) => hidePaths ? createHash2("sha256").update(p).digest("hex").slice(0, 8) : p;
+  const name = (p) => hidePaths ? createHash("sha256").update(p).digest("hex").slice(0, 8) : p;
   const allCalls = sessions.flatMap((s) => [...s.calls, ...s.sidechainCalls]);
   let total = 0;
   let dollars = 0;

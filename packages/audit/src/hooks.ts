@@ -44,7 +44,6 @@ export function promptHook(input: HookInput, d: HookDeps): string {
     ];
     const result = guardDecision({
       sessionId: input.session_id,
-      prompt: input.prompt ?? "",
       now: d.now,
       lastResponseAt: state.sessions[input.session_id] ?? lastCall?.ts,
       lastCall,
@@ -64,6 +63,7 @@ export function stopHook(input: HookInput, d: HookDeps): void {
     if (!input.session_id) return;
     const state = loadState(d.statePath);
     state.sessions[input.session_id] = d.now;
+    delete state.warned[input.session_id]; // a response ends the idle period
     saveState(d.statePath, state, d.now);
   } catch {
     // fail open

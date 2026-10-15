@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { contextOf } from "./classify.js";
@@ -6,7 +5,6 @@ import { toDollars, WRITE_1H, WRITE_5M } from "./cost.js";
 import type { ApiCall } from "./types.js";
 
 export const DEFAULT_THRESHOLD = 150_000;
-export const RESUBMIT_WINDOW_MS = 120_000;
 // Median context right after /compact, from 12 real compactions (62k to 97k, any pre-size).
 const POST_COMPACT_TOKENS = 89_000;
 // ponytail: summary size is not in transcripts, so 20k is an estimate; output costs 5x input.
@@ -20,12 +18,12 @@ export interface GuardState {
   enabled: boolean;
   threshold: number;
   sessions: Record<string, number>;
-  blocked: Record<string, number>;
+  /** session id -> lastResponseAt of the idle period already warned about */
+  warned: Record<string, number>;
 }
 
 export interface GuardInput {
   sessionId: string;
-  prompt: string;
   now: number;
   lastResponseAt?: number;
   lastCall?: ApiCall;
@@ -44,17 +42,16 @@ export function loadState(path: string): GuardState {
       enabled: s.enabled !== false,
       threshold: typeof s.threshold === "number" ? s.threshold : DEFAULT_THRESHOLD,
       sessions: isRecord(s.sessions) ? s.sessions : {},
-      blocked: isRecord(s.blocked) ? s.blocked : {},
+      warned: isRecord(s.warned) ? s.warned : {},
     };
   } catch {
-    return { enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, blocked: {} };
+    return { enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, warned: {} };
   }
 }
 
 export function saveState(path: string, s: GuardState, now: number): void {
-  for (const m of [s.sessions, s.blocked]) {
-    for (const [k, t] of Object.entries(m)) if (now - t > WEEK) delete m[k];
-  }
+  // warned is not aged out: its values are old response times by design. stopHook clears it.
+  for (const [k, t] of Object.entries(s.sessions)) if (now - t > WEEK) delete s.sessions[k];
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(s));
 }
@@ -80,13 +77,10 @@ export function guardDecision(i: GuardInput): GuardResult {
   const context = contextOf(lastCall);
   if (idle <= i.ttlMs || context < state.threshold) return { action: "allow" };
 
-  const fp = createHash("sha256").update(`${i.sessionId}\0${i.prompt}`).digest("hex");
-  const blockedAt = state.blocked[fp];
-  if (blockedAt !== undefined && i.now - blockedAt <= RESUBMIT_WINDOW_MS) {
-    delete state.blocked[fp];
-    return { action: "allow" };
-  }
-  state.blocked[fp] = i.now;
+  // One warning per idle period: once warned, the next prompt goes through. A new
+  // response moves lastResponseAt, which starts a new period.
+  if (state.warned[i.sessionId] === i.lastResponseAt) return { action: "allow" };
+  state.warned[i.sessionId] = i.lastResponseAt;
   return { action: "block", reason: blockReason(context, idle, i.ttlMs, lastCall.model) };
 }
 
@@ -112,6 +106,6 @@ function blockReason(context: number, idleMs: number, ttlMs: number, model: stri
     `  continue   rewrites ${k(context)} tokens at ${mult}x = ${k(cont)} units${money(cont)}`,
     compactLine,
     "  /clear     ~0 units, but drops the conversation",
-    "Re-send the same message within 2 minutes to continue anyway. Turn off with: cachelane-audit guard off",
+    "Send your message again to continue; you are only warned once per break. Turn off with: cachelane-audit guard off",
   ].join("\n");
 }

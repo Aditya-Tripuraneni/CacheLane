@@ -7,9 +7,9 @@ import type { ApiCall } from "../types.js";
 
 const HOUR = 3_600_000;
 const call = (read: number, write1h = 10_000): ApiCall => ({ id: "x", model: "claude-opus-5-5", ts: 0, input: 0, read, write5m: 0, write1h });
-const fresh = (): GuardState => ({ enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, blocked: {} });
+const fresh = (): GuardState => ({ enabled: true, threshold: DEFAULT_THRESHOLD, sessions: {}, warned: {} });
 const input = (over: Partial<Parameters<typeof guardDecision>[0]> = {}) => ({
-  sessionId: "s", prompt: "refactor auth", now: 2 * HOUR, lastResponseAt: 0, lastCall: call(190_000), ttlMs: HOUR, state: fresh(), ...over,
+  sessionId: "s", now: 2 * HOUR, lastResponseAt: 0, lastCall: call(190_000), ttlMs: HOUR, state: fresh(), ...over,
 });
 
 describe("guardDecision", () => {
@@ -35,10 +35,16 @@ describe("guardDecision", () => {
     expect(r.action === "block" && r.reason).toContain("went cold 14m ago (5m TTL)");
   });
 
-  it("lets the same prompt through when re-sent within 2 minutes", () => {
+  it("warns once per idle period: the next prompt goes through, however late", () => {
     const state = fresh();
     guardDecision(input({ state }));
-    expect(guardDecision(input({ state, now: 2 * HOUR + 60_000 })).action).toBe("allow");
+    expect(guardDecision(input({ state, now: 3 * HOUR })).action).toBe("allow");
+  });
+
+  it("warns again after a new response and a fresh break", () => {
+    const state = fresh();
+    guardDecision(input({ state }));
+    expect(guardDecision(input({ state, lastResponseAt: 3 * HOUR, now: 5 * HOUR })).action).toBe("block");
   });
 
   it.each([
