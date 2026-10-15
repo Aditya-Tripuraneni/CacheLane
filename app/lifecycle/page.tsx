@@ -187,7 +187,7 @@ export default function LifecyclePage() {
             cachelane
           </div>
           <p className="text-xs text-[var(--color-fg-faint)]">
-            Built by Aditya Tripuraneni &amp; Rajan Chavada · &copy; 2026 CacheLane Project · MIT License.
+            Built by Aditya Tripuraneni &amp; Rajan Chavada · &copy; 2026 CacheLane Project · Apache-2.0 License.
           </p>
           <div className="flex gap-4 text-xs text-[var(--color-fg-muted)]">
             <Link href="/docs/architecture" className="hover:text-[var(--color-fg)]">Architecture</Link>

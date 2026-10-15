@@ -25,7 +25,7 @@ export default function DemoPage() {
       
       {/* Minimal footer */}
       <footer className="border-t border-[var(--color-border)] py-8 text-center text-sm text-[var(--color-fg-muted)]">
-        <p>© 2026 CacheLane. Open source under the MIT License.</p>
+        <p>© 2026 CacheLane. Open source under the Apache-2.0 License.</p>
       </footer>
     </div>
   );

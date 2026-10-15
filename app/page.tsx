@@ -51,7 +51,7 @@ export default function HomePage() {
               
               <FadeIn delay={0.05}>
                 <h1 className="text-4xl font-bold font-serif tracking-tight sm:text-5xl lg:text-6xl text-[var(--color-fg)] leading-[1.05]">
-                  Pay <span className="bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-warn)] bg-clip-text text-transparent">90% Less</span> on Repeated Claude Code Tokens
+                  Stop Paying <span className="bg-gradient-to-r from-[var(--color-accent)] to-[var(--color-warn)] bg-clip-text text-transparent">2x</span> to Rebuild a Cold Cache
                 </h1>
               </FadeIn>
 
@@ -126,7 +126,7 @@ export default function HomePage() {
                 Side-by-Side: The Caching Edge
               </h2>
               <p className="text-[var(--color-fg-muted)] text-base sm:text-lg">
-                See how standard conversation context cost compounds vs. CacheLane's region reordering and K-pruning.
+                Illustrative only: how uncached context cost compounds vs. a cached prefix plus pruning. Claude Code already caches by default; run npx cachelane-audit for your real numbers.
               </p>
             </FadeIn>
           </div>
@@ -137,11 +137,11 @@ export default function HomePage() {
             <FadeIn delay={0.05}>
               <div className="bg-[var(--color-bg)] border border-[var(--color-border)] rounded-2xl p-6 shadow-md relative overflow-hidden flex flex-col justify-between h-full">
                 <div className="absolute top-0 right-0 bg-[var(--color-danger)]/10 text-[var(--color-danger)] font-mono text-[10px] uppercase font-bold tracking-wider px-3 py-1 rounded-bl-xl border-l border-b border-[var(--color-border)]">
-                  Standard Claude Code
+                  Without prompt caching
                 </div>
                 <div>
                   <h3 className="text-lg font-bold font-serif mb-1 text-[var(--color-fg)]">Linear Cost Accumulation</h3>
-                  <p className="text-xs text-[var(--color-fg-faint)] mb-6">No breakpoint management or context pruning.</p>
+                  <p className="text-xs text-[var(--color-fg-faint)] mb-6">No cache breakpoints and no context pruning (illustrative).</p>
 
                   <div className="space-y-4 font-mono text-xs">
                     <div>
@@ -232,7 +232,7 @@ export default function HomePage() {
                     <span className="text-[var(--color-fg-muted)]">Cumulative Input cost:</span>
                     <div className="text-right">
                       <span className="font-bold text-[var(--color-success)]">18,500 Billed Tokens</span>
-                      <span className="block text-[10px] text-[var(--color-success)] font-semibold">-66% cost reduction</span>
+                      <span className="block text-[10px] text-[var(--color-success)] font-semibold">illustrative, not a benchmark</span>
                     </div>
                   </div>
                 </div>
@@ -352,7 +352,7 @@ export default function HomePage() {
             Built by Aditya Tripuraneni &amp; Rajan Chavada
             <span className="hidden sm:inline"> · </span>
             <br className="sm:hidden" />
-            &copy; 2026 CacheLane Project. Distributed under the MIT License.
+            &copy; 2026 CacheLane Project. Distributed under the Apache-2.0 License.
           </p>
           <div className="flex gap-4 text-xs text-[var(--color-fg-muted)]">
             <Link href="/docs/getting-started" className="hover:text-[var(--color-fg)]">Docs</Link>

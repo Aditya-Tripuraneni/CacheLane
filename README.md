@@ -1,44 +1,41 @@
 # CacheLane
 
 [![Website](https://img.shields.io/badge/website-cache--lane.vercel.app-7c3aed.svg)](https://cache-lane.vercel.app/)
-[![Node Version](https://img.shields.io/badge/node-%3E%3D20.10-blue.svg)](https://nodejs.org)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-> **A local cache-discipline layer for Claude Code.**
+> **See where your Claude Code tokens go, and stop paying to rebuild a cold cache.**
 >
-> CacheLane sits between Claude Code and `api.anthropic.com` and reorganizes each turn's prompt so Anthropic's prompt cache fires far more often, then prunes stale tool output. The result is **30% to 60% lower input-token cost** on long sessions, with **zero change to how you use Claude Code**.
->
-> 🌐 **Website:** [cache-lane.vercel.app](https://cache-lane.vercel.app/)
-
-<video src="https://github.com/Aditya-Tripuraneni/CacheLane/raw/main/web/public/cachelane.mp4" width="100%" controls autoplay loop muted></video>
-
----
+> Claude Code already caches your conversation well. The expensive moment is coming back to a long session after a break: the cache has expired, and your next message rewrites the whole context at 1.25x or 2x the input price. On one developer's last 30 days, that was **28% of input spend (~$466 at API price)**, across 68 sessions with a 97.9% cache hit ratio.
 
 ## Quickstart
 
 ```bash
-# 1. Install the CLI
-npm install -g cachelane
-
-# 2. Wire it into Claude Code (idempotent, safe to re-run)
-cachelane install
-
-# 3. Restart Claude Code so it picks up the new settings
+npx cachelane-audit          # where your input tokens went, and why the cache rebuilt
 ```
 
-**That's it.** You don't start a server, run a proxy, or change any commands. After the restart, CacheLane intercepts and optimizes every turn automatically.
+Then add the cold-cache guard inside Claude Code:
 
-> ⚠️ **Do not run `cachelane proxy` yourself.** The proxy is started *for you* (see [How it works](#how-it-works)). Running it manually collides on port 7332 and crashes with `EADDRINUSE`.
+```
+/plugin marketplace add Aditya-Tripuraneni/CacheLane
+/plugin install cachelane@cachelane
+```
 
-### Verify it's working
+The guard blocks your first message once when you return to a large session (150k+ tokens) whose cache has expired, and shows what continuing, `/compact`, and `/clear` would cost. Send your message again to continue; you are only warned once per break.
+
+Everything runs locally, reads usage metadata only, and has no backend.
+
+## Power mode: the request-rewriting proxy
 
 ```bash
-cachelane doctor                  # health check: node, config, db, mcp, hooks
-cachelane sessions                # list recorded sessions + cache savings
-cachelane stats --scope session   # stats for the current project's latest session
+npm install -g cachelane
+cachelane install --proxy         # MCP server, hooks, and ANTHROPIC_BASE_URL -> local proxy
+cachelane doctor                  # health check
+cachelane stats --scope session   # run from your project directory
 ```
 
-Run `cachelane stats` **from your project directory**. It scopes to that project automatically (see [Reading your stats](#reading-your-stats)).
+The proxy compresses noisy tool output (git, npm, test logs) and prunes stale tool results while keeping Claude Code's cache breakpoints intact. Upgrading from 1.1.x keeps an existing proxy install. 1.1.7 and earlier stripped Claude Code's rolling cache breakpoint and could raise cost on long sessions, so please upgrade.
+
+> ⚠️ **Do not run `cachelane proxy` yourself.** It is started for you. Running it manually collides on port 7332.
 
 ---
 
@@ -156,7 +153,7 @@ That single formula is the whole story (the multipliers `1.25` and `0.1` are the
 | 50 | 0.123× | ~88% |
 | large N | **0.1×** | **90% (the ceiling)** |
 
-As the session grows, the one-time `1.15/N` write cost shrinks toward zero and the average slides down to **0.1×**, i.e. a **90% discount** on the repeated part. That 90% is not a marketing number. It is exactly the cache-read multiplier (`0.1×`) from the table above, and it is the theoretical ceiling. Real sessions also carry a small always-full-price "new" part each turn plus the occasional cache miss, which pulls the *measured* number down to roughly **80%**, which is what `cachelane stats` reports in practice. Short chats sit low on this curve; long coding sessions ride near the top.
+As the session grows, the one-time `1.15/N` write cost shrinks toward zero and the average slides down to **0.1×**, i.e. a **90% discount** on the repeated part. That 90% is not a marketing number. It is exactly the cache-read multiplier (`0.1×`) from the table above, and it is the theoretical ceiling. Short chats sit low on this curve; long coding sessions ride near the top.
 
 ### 6. Keeping it lean: K-pruning and stubs
 
@@ -186,13 +183,13 @@ By default CacheLane does not store prompts, code, or tool-output bodies. Enabli
 
 ### 8. Keeping the cache warm (keepalive)
 
-Anthropic's cache lives about 5 minutes by default; a 1-hour tier is available at 2× write cost ([Prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)). If you step away mid-session, the cache would expire and your next turn would pay full price to re-seed it. So a keepalive worker sends a minimal synthetic ping (`max_tokens=1`) during idle gaps to keep the prefix hot, and CacheLane promotes large prefixes (≥ 50k tokens) to that 1-hour tier automatically.
+Anthropic's cache lives about 5 minutes by default; a 1-hour tier is available at 2× write cost ([Prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching)). If you step away mid-session, the cache expires and your next turn pays to re-seed it. Keepalive pings are **not implemented** (the worker is wired but its executor is a stub). The cold-cache guard plugin handles breaks instead: it warns you before the expensive rebuild and shows the cheaper options.
 
 ---
 
 ## How it works
 
-`cachelane install` makes two edits to your Claude Code configuration:
+`cachelane install --proxy` makes two edits to your Claude Code configuration:
 
 1. **Registers an MCP server** in `~/.claude.json` (`mcpServers.cachelane`). Claude Code launches `cachelane mcp` automatically every time it starts.
 2. **Redirects API traffic** by setting `ANTHROPIC_BASE_URL=http://127.0.0.1:7332` in `~/.claude/settings.json`. This is what routes Claude Code's requests through CacheLane.
@@ -289,7 +286,8 @@ The region totals at the bottom reconcile exactly to the authoritative `usage` o
 
 | Command | Purpose |
 |---------|---------|
-| `cachelane install` | Register the MCP server + hooks and redirect Claude Code traffic through the proxy. Idempotent. |
+| `cachelane install` | Print next steps (audit, guard plugin). Keeps an existing proxy install up to date. |
+| `cachelane install --proxy` | Register the MCP server + hooks and redirect Claude Code traffic through the proxy. Idempotent. |
 | `cachelane uninstall [--purge]` | Remove the integration. `--purge` also deletes `~/.cachelane` (config + database). |
 | `cachelane doctor [--json]` | Health check: Node version, config, SQLite writability, MCP + hook registration. |
 | `cachelane stats [--scope session\\|workspace\\|all] [--json]` | Cache hit ratio, turns, pruned blocks, and estimated savings. |
