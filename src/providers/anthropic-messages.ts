@@ -11,11 +11,14 @@ function parseAnthropicUsage(raw: Buffer, contentType?: string): NeutralUsage | 
   const apply = (u: Record<string, number> | undefined) => {
     if (!u) return;
     found = true;
+    // The API nests the TTL split under usage.cache_creation; cache_creation_input_tokens
+    // is the total of both tiers, so it is only a 5m fallback when the split is absent.
+    const split = (u as { cache_creation?: Record<string, number> }).cache_creation;
     input = u.input_tokens ?? input;
     output = u.output_tokens ?? output;
     cacheRead = u.cache_read_input_tokens ?? cacheRead;
-    write5m = u.cache_creation_5m_tokens ?? u.cache_creation_input_tokens ?? write5m;
-    write1h = u.cache_creation_1h_tokens ?? write1h;
+    write5m = split?.ephemeral_5m_input_tokens ?? u.cache_creation_5m_tokens ?? u.cache_creation_input_tokens ?? write5m;
+    write1h = split?.ephemeral_1h_input_tokens ?? u.cache_creation_1h_tokens ?? write1h;
   };
   for (const line of text.split("\n")) {
     const t = line.trim();

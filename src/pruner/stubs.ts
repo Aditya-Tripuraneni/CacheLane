@@ -3,7 +3,7 @@ import type { PruneDecision } from "./types.js";
 
 export function makeStubSummary(row: BlockRow): string {
   const handle = row.refetch_handle ?? "unknown refetch handle";
-  return `${row.kind} ${handle} (${row.token_count} tokens elided)`;
+  return `${row.kind} ${handle} (content elided)`;
 }
 
 export function formatStubText(decision: PruneDecision): string {
