@@ -503,8 +503,8 @@ describe("cachelane CLI", () => {
       JSON.stringify({ mcpServers: { other: { command: "other" } } }, null, 2),
     );
 
-    const first = JSON.parse(await run(["install"])) as { changed: boolean };
-    const second = JSON.parse(await run(["install"])) as { changed: boolean };
+    const first = JSON.parse(await run(["install", "--proxy"])) as { changed: boolean };
+    const second = JSON.parse(await run(["install", "--proxy"])) as { changed: boolean };
     const mcp = JSON.parse(
       fs.readFileSync(path.join(env.CLAUDE_HOME!, "mcp.json"), "utf-8"),
     ) as { mcpServers: Record<string, unknown> };
@@ -514,12 +514,26 @@ describe("cachelane CLI", () => {
     expect(Object.keys(mcp.mcpServers).sort()).toEqual(["cachelane", "other"]);
   });
 
+  it("install without --proxy writes nothing and prints next steps", async () => {
+    const out = JSON.parse(await run(["install"])) as { changed: boolean; proxy: boolean; next_steps: string[] };
+    expect(out).toMatchObject({ changed: false, proxy: false });
+    expect(out.next_steps.join("\n")).toContain("npx cachelane-audit");
+    expect(fs.existsSync(path.join(env.CLAUDE_HOME!, "settings.json"))).toBe(false);
+  });
+
+  it("install keeps an existing proxy install on upgrade", async () => {
+    await run(["install", "--proxy"]);
+    const again = JSON.parse(await run(["install"])) as { changed: boolean; mcp_path?: string };
+    expect(again.mcp_path).toBeDefined();
+    expect(again.changed).toBe(false);
+  });
+
   it("install reports malformed Claude MCP config without overwriting it", async () => {
     fs.mkdirSync(env.CLAUDE_HOME!, { recursive: true });
     const mcpPath = path.join(env.CLAUDE_HOME!, "mcp.json");
     fs.writeFileSync(mcpPath, "{not json");
 
-    await expect(runFailure(["install"])).resolves.toContain("Invalid JSON");
+    await expect(runFailure(["install", "--proxy"])).resolves.toContain("Invalid JSON");
     expect(fs.readFileSync(mcpPath, "utf-8")).toBe("{not json");
   });
 
@@ -528,7 +542,7 @@ describe("cachelane CLI", () => {
     fs.mkdirSync(path.dirname(hookPath), { recursive: true });
     fs.writeFileSync(hookPath, JSON.stringify({ name: "cachelane", old: true }, null, 2));
 
-    await run(["install"]);
+    await run(["install", "--proxy"]);
     const hook = JSON.parse(fs.readFileSync(hookPath, "utf-8")) as {
       hooks: { UserPromptSubmit: unknown[]; Stop: unknown[] };
     };
@@ -554,7 +568,7 @@ describe("cachelane CLI", () => {
   });
 
   it("uninstall preserves data unless --purge is passed", async () => {
-    await run(["install"]);
+    await run(["install", "--proxy"]);
     const dbPath = path.join(env.CACHELANE_HOME!, "cachelane.db");
     openDatabase(dbPath).close();
 
@@ -562,7 +576,7 @@ describe("cachelane CLI", () => {
     expect(fs.existsSync(path.join(env.CACHELANE_HOME!, "config.json"))).toBe(true);
     expect(fs.existsSync(dbPath)).toBe(true);
 
-    await run(["install"]);
+    await run(["install", "--proxy"]);
     await run(["uninstall", "--purge"]);
     expect(fs.existsSync(env.CACHELANE_HOME!)).toBe(false);
   });

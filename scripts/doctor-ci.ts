@@ -26,7 +26,7 @@ function runCli(args: string[]): string {
 }
 
 try {
-  runCli(["install"]);
+  runCli(["install", "--proxy"]);
   const report = JSON.parse(runCli(["doctor", "--json"])) as { ok: boolean };
   if (!report.ok) {
     throw new Error(`doctor --json returned ok=false: ${JSON.stringify(report, null, 2)}`);

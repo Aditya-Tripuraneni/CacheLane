@@ -155,6 +155,14 @@ export function mergeBaseUrlIntoSettings(settingsPath: string, port: number): bo
   return true;
 }
 
+/** True when Claude Code already points at the local CacheLane proxy (an existing proxy install). */
+export function proxyInstalled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const settings = readJsonObject(claudeSettingsPath(env));
+  const claudeEnv: JsonObject = isObject(settings.env) ? (settings.env as JsonObject) : {};
+  const intended = baseUrlFor(loadConfig(cachelaneConfigPath(env)).proxy.port);
+  return claudeEnv.ANTHROPIC_BASE_URL === intended || claudeEnv.ANTHROPIC_BEDROCK_BASE_URL === intended;
+}
+
 function mergeUpstreamFromSettingsIntoConfig(
   settingsPath: string,
   configPath: string,

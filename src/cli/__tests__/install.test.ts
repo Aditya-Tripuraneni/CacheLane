@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   installCachelane,
+  proxyInstalled,
   uninstallCachelane,
   mergeBaseUrlIntoSettings,
   removeBaseUrlFromSettings,
@@ -316,5 +317,21 @@ describe("Bedrock endpoint wiring", () => {
       env?: { ANTHROPIC_BEDROCK_BASE_URL?: string };
     };
     expect(settings.env?.ANTHROPIC_BEDROCK_BASE_URL).toBeUndefined();
+  });
+});
+
+describe("proxyInstalled", () => {
+  it("is false before any install", () => {
+    expect(proxyInstalled(env)).toBe(false);
+  });
+
+  it("is true after the proxy install", () => {
+    installCachelane(env);
+    expect(proxyInstalled(env)).toBe(true);
+  });
+
+  it("is false when ANTHROPIC_BASE_URL points somewhere else", () => {
+    writeSettings({ env: { ANTHROPIC_BASE_URL: "https://api.z.ai/api/anthropic" } });
+    expect(proxyInstalled(env)).toBe(false);
   });
 });
