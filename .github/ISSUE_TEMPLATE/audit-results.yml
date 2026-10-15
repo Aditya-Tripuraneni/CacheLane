@@ -1,0 +1,45 @@
+name: Share your cachelane-audit results
+description: Paste your audit output so we can learn how Claude Code caching behaves across setups.
+title: "Audit results: "
+labels: ["audit-results"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing. Run `npx cachelane-audit --json --no-paths` and paste the output below.
+
+        The output contains token counts and hashed project names only. No prompts, code or file paths.
+        We combine submissions into a monthly "State of Claude Code caching" post. Only aggregates are published.
+  - type: textarea
+    id: audit-json
+    attributes:
+      label: Audit output
+      description: Output of `npx cachelane-audit --json --no-paths`
+      render: json
+    validations:
+      required: true
+  - type: dropdown
+    id: plan
+    attributes:
+      label: Plan type
+      options:
+        - API key
+        - Pro
+        - Max
+        - Team/Enterprise
+        - Bedrock/Vertex
+        - Prefer not to say
+    validations:
+      required: true
+  - type: dropdown
+    id: session-length
+    attributes:
+      label: Typical session length
+      options:
+        - Under 30 minutes
+        - 30 minutes to 2 hours
+        - 2 to 6 hours
+        - Longer than 6 hours
+        - Prefer not to say
+    validations:
+      required: false
