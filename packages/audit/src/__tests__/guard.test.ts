@@ -20,6 +20,21 @@ describe("guardDecision", () => {
     expect(r.action === "block" && r.reason).toContain("/compact");
   });
 
+  it("says /compact costs more when it does (200k context, 1h TTL)", () => {
+    const r = guardDecision(input());
+    expect(r.action === "block" && r.reason).toContain("/compact   costs more than continuing");
+  });
+
+  it("prices /compact when it is cheaper (600k context, 1h TTL)", () => {
+    const r = guardDecision(input({ lastCall: call(590_000) }));
+    expect(r.action === "block" && r.reason).toMatch(/\/compact {3}~600k read \+ summary \+ ~89k rewrite = ~878k units/);
+  });
+
+  it("drops the hour when under an hour", () => {
+    const r = guardDecision(input({ now: 14 * 60_000, ttlMs: 300_000 }));
+    expect(r.action === "block" && r.reason).toContain("went cold 14m ago (5m TTL)");
+  });
+
   it("lets the same prompt through when re-sent within 2 minutes", () => {
     const state = fresh();
     guardDecision(input({ state }));

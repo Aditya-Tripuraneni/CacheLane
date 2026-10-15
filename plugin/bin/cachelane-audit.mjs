@@ -87,7 +87,9 @@ function toDollars(unitCount, model) {
 // packages/audit/src/guard.ts
 var DEFAULT_THRESHOLD = 15e4;
 var RESUBMIT_WINDOW_MS = 12e4;
-var COMPACT_SUMMARY_TOKENS = 4e4;
+var POST_COMPACT_TOKENS = 89e3;
+var SUMMARY_OUTPUT_TOKENS = 2e4;
+var OUTPUT_MULT = 5;
 var HOUR2 = 36e5;
 var FIVE_MIN2 = 3e5;
 var WEEK = 7 * 24 * HOUR2;
@@ -141,7 +143,7 @@ function guardDecision(i) {
 function blockReason(context, idleMs, ttlMs, model) {
   const mult = ttlMs >= HOUR2 ? WRITE_1H : WRITE_5M;
   const cont = context * mult;
-  const compact = context + COMPACT_SUMMARY_TOKENS * mult;
+  const compact = context + SUMMARY_OUTPUT_TOKENS * OUTPUT_MULT + POST_COMPACT_TOKENS * mult;
   const money = (u) => {
     const d = toDollars(u, model);
     return d === void 0 ? "" : ` (~$${d.toFixed(2)} at API price)`;
@@ -149,10 +151,11 @@ function blockReason(context, idleMs, ttlMs, model) {
   const k = (n) => `${Math.round(n / 1e3)}k`;
   const h = Math.floor(idleMs / HOUR2);
   const m = Math.round(idleMs % HOUR2 / 6e4);
+  const compactLine = compact < cont ? `  /compact   ~${k(context)} read + summary + ~${k(POST_COMPACT_TOKENS)} rewrite = ~${k(compact)} units${money(compact)}, estimate` : `  /compact   costs more than continuing at this size (~${k(compact)} units), but makes later turns cheaper`;
   return [
-    `cachelane: your prompt cache went cold ${h}h ${m}m ago (${ttlMs >= HOUR2 ? "1h" : "5m"} TTL). Context: ${k(context)} tokens.`,
+    `cachelane: your prompt cache went cold ${h > 0 ? `${h}h ${m}m` : `${m}m`} ago (${ttlMs >= HOUR2 ? "1h" : "5m"} TTL). Context: ${k(context)} tokens.`,
     `  continue   rewrites ${k(context)} tokens at ${mult}x = ${k(cont)} units${money(cont)}`,
-    `  /compact   ~${k(context)} at 1x + ~${k(COMPACT_SUMMARY_TOKENS)} summary = ~${k(compact)} units${money(compact)}, estimate`,
+    compactLine,
     "  /clear     ~0 units, but drops the conversation",
     "Re-send the same message within 2 minutes to continue anyway. Turn off with: cachelane-audit guard off"
   ].join("\n");

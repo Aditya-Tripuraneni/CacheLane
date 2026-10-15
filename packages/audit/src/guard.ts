@@ -7,8 +7,11 @@ import type { ApiCall } from "./types.js";
 
 export const DEFAULT_THRESHOLD = 150_000;
 export const RESUBMIT_WINDOW_MS = 120_000;
-// ponytail: fixed estimate; calibrate from compact_boundary preTokens in real transcripts.
-const COMPACT_SUMMARY_TOKENS = 40_000;
+// Median context right after /compact, from 12 real compactions (62k to 97k, any pre-size).
+const POST_COMPACT_TOKENS = 89_000;
+// ponytail: summary size is not in transcripts, so 20k is an estimate; output costs 5x input.
+const SUMMARY_OUTPUT_TOKENS = 20_000;
+const OUTPUT_MULT = 5;
 const HOUR = 3_600_000;
 const FIVE_MIN = 300_000;
 const WEEK = 7 * 24 * HOUR;
@@ -90,7 +93,9 @@ export function guardDecision(i: GuardInput): GuardResult {
 function blockReason(context: number, idleMs: number, ttlMs: number, model: string): string {
   const mult = ttlMs >= HOUR ? WRITE_1H : WRITE_5M;
   const cont = context * mult;
-  const compact = context + COMPACT_SUMMARY_TOKENS * mult;
+  // After a break the compaction call reads the full context uncached, writes a summary as
+  // output, and the next turn re-caches the smaller post-compact context.
+  const compact = context + SUMMARY_OUTPUT_TOKENS * OUTPUT_MULT + POST_COMPACT_TOKENS * mult;
   const money = (u: number) => {
     const d = toDollars(u, model);
     return d === undefined ? "" : ` (~$${d.toFixed(2)} at API price)`;
@@ -98,10 +103,14 @@ function blockReason(context: number, idleMs: number, ttlMs: number, model: stri
   const k = (n: number) => `${Math.round(n / 1000)}k`;
   const h = Math.floor(idleMs / HOUR);
   const m = Math.round((idleMs % HOUR) / 60_000);
+  const compactLine =
+    compact < cont
+      ? `  /compact   ~${k(context)} read + summary + ~${k(POST_COMPACT_TOKENS)} rewrite = ~${k(compact)} units${money(compact)}, estimate`
+      : `  /compact   costs more than continuing at this size (~${k(compact)} units), but makes later turns cheaper`;
   return [
-    `cachelane: your prompt cache went cold ${h}h ${m}m ago (${ttlMs >= HOUR ? "1h" : "5m"} TTL). Context: ${k(context)} tokens.`,
+    `cachelane: your prompt cache went cold ${h > 0 ? `${h}h ${m}m` : `${m}m`} ago (${ttlMs >= HOUR ? "1h" : "5m"} TTL). Context: ${k(context)} tokens.`,
     `  continue   rewrites ${k(context)} tokens at ${mult}x = ${k(cont)} units${money(cont)}`,
-    `  /compact   ~${k(context)} at 1x + ~${k(COMPACT_SUMMARY_TOKENS)} summary = ~${k(compact)} units${money(compact)}, estimate`,
+    compactLine,
     "  /clear     ~0 units, but drops the conversation",
     "Re-send the same message within 2 minutes to continue anyway. Turn off with: cachelane-audit guard off",
   ].join("\n");

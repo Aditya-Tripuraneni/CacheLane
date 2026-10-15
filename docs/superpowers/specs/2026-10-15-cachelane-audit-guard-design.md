@@ -108,7 +108,7 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
   | Option | Cost |
   |---|---|
   | continue | context x write multiplier |
-  | `/compact` | context x 1.0 + about 40k summary x write multiplier (labeled estimate) |
+  | `/compact` | context x 1.0 + ~20k summary x 5 (output) + ~89k post-compact context x write multiplier (labeled estimate). Shown as "costs more than continuing" when it does. 89k is the median of 12 real compactions. |
   | `/clear` | about 0, loses context |
 
 - "Re-send your message to continue anyway."
@@ -171,5 +171,5 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
 ## Open questions
 
 - How `systemMessage` renders for UserPromptSubmit. This only affects a possible warn-only mode.
-- The `/compact` summary-size estimate (40k). Calibrate it from `compact_boundary` entries in real transcripts.
+- The `/compact` summary output size (20k estimate); it is not recorded in transcripts.
 - Keepalive without credential reuse: is there any supported way?
