@@ -184,6 +184,8 @@ describe("mutateRequest", () => {
             role: "user",
             content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral", ttl: "5m" } }],
           },
+          // A later message, so the marked block above is not the rolling-tail position.
+          { role: "assistant", content: [{ type: "text", text: "hello" }] },
         ],
       };
       const boundaries: RegionBoundaries = { middle_end_in_messages: null };
@@ -419,6 +421,61 @@ describe("mutateRequest", () => {
 
       // Original must not be mutated
       expect(JSON.stringify(request)).toBe(originalJson);
+    });
+  });
+
+  // Claude Code places a rolling breakpoint on the last block of the last message so
+  // each turn reads all prior history from cache. Stripping it without a replacement
+  // bills the whole conversation at 1.0x on every turn.
+  describe("rolling tail breakpoint", () => {
+    const claudeCodeRequest: AnthropicMessagesRequest = {
+      ...baseRequest,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "fix the bug" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Looking." },
+            { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_1", content: "a.ts", cache_control: { type: "ephemeral", ttl: "5m" } },
+          ],
+        },
+      ],
+    };
+    const noMiddle: RegionBoundaries = { middle_end_in_messages: null };
+
+    it("keeps a breakpoint on the last block of the last message when no middle region exists", () => {
+      const out = mutateRequest(claudeCodeRequest, noMiddle, breakpoints);
+      const last = out.messages.at(-1)!.content as { cache_control?: unknown }[];
+      expect(last.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "5m" });
+    });
+
+    it("never exceeds Anthropic's 4-breakpoint limit", () => {
+      const out = mutateRequest(claudeCodeRequest, { middle_end_in_messages: 1 }, breakpoints);
+      const blocks = [
+        ...(out.system ?? []),
+        ...(out.tools ?? []),
+        ...out.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
+      ] as { cache_control?: unknown }[];
+      expect(blocks.filter((b) => b.cache_control).length).toBeLessThanOrEqual(4);
+    });
+
+    it("skips the tail marker when the last block is a thinking block", () => {
+      const req: AnthropicMessagesRequest = {
+        ...baseRequest,
+        messages: [
+          ...baseRequest.messages,
+          { role: "assistant", content: [{ type: "thinking", thinking: "hmm", signature: "sig" }] as never },
+        ],
+      };
+      const out = mutateRequest(req, noMiddle, breakpoints);
+      const last = out.messages.at(-1)!.content as { cache_control?: unknown }[];
+      expect(last.at(-1)?.cache_control).toBeUndefined();
     });
   });
 });

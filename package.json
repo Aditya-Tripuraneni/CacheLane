@@ -7,6 +7,10 @@
   "bin": {
     "cachelane": "dist/cli/index.js"
   },
+  "files": [
+    "dist",
+    "scripts/postinstall.mjs"
+  ],
   "engines": {
     "node": ">=20.10"
   },
