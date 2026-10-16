@@ -1,6 +1,6 @@
 {
   "name": "cachelane",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Cache-aware prompt orchestration for Claude Code",
   "license": "Apache-2.0",
   "type": "module",
@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "prepublishOnly": "npm run build",
     "build:audit": "tsup --config packages/audit/tsup.config.ts",
     "typecheck:audit": "tsc -p packages/audit/tsconfig.json",
     "test": "vitest run",
