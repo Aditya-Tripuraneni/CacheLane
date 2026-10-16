@@ -1,0 +1,12 @@
+{
+  "name": "cachelane-audit",
+  "version": "0.1.0",
+  "description": "See where your Claude Code input tokens went and why the prompt cache rebuilt. Zero dependencies.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": { "cachelane-audit": "dist/cli.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=18" },
+  "repository": { "type": "git", "url": "git+https://github.com/Aditya-Tripuraneni/CacheLane.git", "directory": "packages/audit" },
+  "keywords": ["claude-code", "prompt-caching", "anthropic", "tokens", "cost"]
+}
