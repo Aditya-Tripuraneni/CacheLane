@@ -233,8 +233,9 @@ async function runArm(turns: AnthropicMessagesRequest[], mutationEnabled: boolea
 
 interface WorkloadOptions {
   turns: number;
-  /** Put a Claude-Code-style native cache_control breakpoint on the last system
-   *  block (the baseline-with-native-caching scenario). */
+  /** Put Claude Code's native cache_control breakpoints on the last system block
+   *  and on the last block of the last message (the rolling tail), the
+   *  baseline-with-native-caching scenario. */
   nativeBreakpoint?: boolean;
 }
 
@@ -258,6 +259,10 @@ function buildWorkload(opts: WorkloadOptions): AnthropicMessagesRequest[] {
       messages: history.map((m) => ({ role: m.role, content: m.content.map((c) => ({ ...c })) })),
       max_tokens: 1024,
     };
+    if (opts.nativeBreakpoint) {
+      const tail = request.messages.at(-1)!.content.at(-1)! as { cache_control?: unknown };
+      tail.cache_control = { type: "ephemeral", ttl: "5m" };
+    }
     requests.push(request);
     history.push({ role: "assistant", content: [{ type: "text", text: `Answer ${t}.` }] });
   }
@@ -295,11 +300,10 @@ describe("A — CacheLane beats an uncached client", () => {
 
 describe("B1 — orchestration alone never costs more than a native breakpoint", () => {
   it("matches (does not beat) a client that already sets one optimal breakpoint", async () => {
-    // Honest finding: when the baseline client already places a single
-    // cache_control breakpoint over the static prefix — and there is no idle
-    // block to prune — CacheLane's reordering caches the SAME prefix and lands
-    // at PARITY, not a strict win. Observed: off === on (both 4587.5). The real
-    // marginal benefit over native caching comes from pruning (see B2).
+    // Honest finding: when the baseline client already places Claude Code's
+    // breakpoints (static prefix + rolling tail), and there is no idle block to
+    // prune, CacheLane caches the SAME prefix and lands at PARITY, not a strict
+    // win. The real marginal benefit over native caching comes from pruning (see B2).
     const workload = buildWorkload({ turns: 6, nativeBreakpoint: true });
 
     const off = await runArm(workload, false); // native cache: breakpoint present, no mutation

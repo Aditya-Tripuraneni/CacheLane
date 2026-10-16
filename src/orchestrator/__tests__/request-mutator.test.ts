@@ -184,6 +184,8 @@ describe("mutateRequest", () => {
             role: "user",
             content: [{ type: "text", text: "hi", cache_control: { type: "ephemeral", ttl: "5m" } }],
           },
+          // A later message, so the marked block above is not the rolling-tail position.
+          { role: "assistant", content: [{ type: "text", text: "hello" }] },
         ],
       };
       const boundaries: RegionBoundaries = { middle_end_in_messages: null };
@@ -419,6 +421,97 @@ describe("mutateRequest", () => {
 
       // Original must not be mutated
       expect(JSON.stringify(request)).toBe(originalJson);
+    });
+  });
+
+  // Claude Code places a rolling breakpoint on the last block of the last message so
+  // each turn reads all prior history from cache. Stripping it without a replacement
+  // bills the whole conversation at 1.0x on every turn.
+  describe("rolling tail breakpoint", () => {
+    const claudeCodeRequest: AnthropicMessagesRequest = {
+      ...baseRequest,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "fix the bug" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Looking." },
+            { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_1", content: "a.ts", cache_control: { type: "ephemeral", ttl: "5m" } },
+          ],
+        },
+      ],
+    };
+    const noMiddle: RegionBoundaries = { middle_end_in_messages: null };
+
+    it("keeps a breakpoint on the last block of the last message when no middle region exists", () => {
+      const out = mutateRequest(claudeCodeRequest, noMiddle, breakpoints);
+      const last = out.messages.at(-1)!.content as { cache_control?: unknown }[];
+      expect(last.at(-1)?.cache_control).toEqual({ type: "ephemeral", ttl: "5m" });
+    });
+
+    it("never exceeds Anthropic's 4-breakpoint limit", () => {
+      const out = mutateRequest(claudeCodeRequest, { middle_end_in_messages: 1 }, breakpoints);
+      const blocks = [
+        ...(out.system ?? []),
+        ...(out.tools ?? []),
+        ...out.messages.flatMap((m) => (Array.isArray(m.content) ? m.content : [])),
+      ] as { cache_control?: unknown }[];
+      expect(blocks.filter((b) => b.cache_control).length).toBeLessThanOrEqual(4);
+    });
+
+    it("skips the tail marker when the last block is a thinking block", () => {
+      const req: AnthropicMessagesRequest = {
+        ...baseRequest,
+        messages: [
+          ...baseRequest.messages,
+          { role: "assistant", content: [{ type: "thinking", thinking: "hmm", signature: "sig" }] as never },
+        ],
+      };
+      const out = mutateRequest(req, noMiddle, breakpoints);
+      const last = out.messages.at(-1)!.content as { cache_control?: unknown }[];
+      expect(last.at(-1)?.cache_control).toBeUndefined();
+    });
+  });
+
+  // Claude Code sends 1h markers on subscriptions. Downgrading them to 5m makes every
+  // pause longer than 5 minutes a full cache rebuild for proxy users.
+  describe("client cache TTL", () => {
+    const oneHour = { type: "ephemeral", ttl: "1h" } as const;
+    const req1h: AnthropicMessagesRequest = {
+      ...baseRequest,
+      system: [
+        { type: "text", text: "You are Claude." },
+        { type: "text", text: "CLAUDE.md content here.", cache_control: oneHour },
+      ],
+      messages: [
+        { role: "user", content: [{ type: "text", text: "Read foo.ts" }] },
+        { role: "assistant", content: [{ type: "text", text: "Sure." }] },
+        { role: "user", content: [{ type: "text", text: "Now refactor.", cache_control: oneHour }] },
+      ],
+    };
+    const lastMarker = (out: AnthropicMessagesRequest, i: number) =>
+      (out.messages[i]!.content as { cache_control?: unknown }[]).at(-1)?.cache_control;
+
+    it("keeps the client's 1h tier on the tail and middle markers", () => {
+      const out = mutateRequest(req1h, { middle_end_in_messages: 2 }, breakpoints);
+      expect(lastMarker(out, 2)).toEqual(oneHour);
+      expect(lastMarker(out, 1)).toEqual(oneHour);
+    });
+
+    it("raises the prefix to 1h so no 1h marker follows a 5m one", () => {
+      const out = mutateRequest(req1h, { middle_end_in_messages: null }, breakpoints, "5m");
+      expect(out.system?.at(-1)?.cache_control).toEqual(oneHour);
+    });
+
+    it("keeps 5m markers when the client sent 5m", () => {
+      const out = mutateRequest(baseRequest, { middle_end_in_messages: null }, breakpoints);
+      expect(lastMarker(out, 2)).toEqual({ type: "ephemeral", ttl: "5m" });
     });
   });
 });

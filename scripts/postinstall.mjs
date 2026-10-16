@@ -47,7 +47,7 @@ const lines = [
   "",
   `  ${C.bold}GET STARTED${C.reset}`,
   "",
-  `  ${C.cyan}cachelane install${C.reset}    ${C.gray}Register MCP server and hooks${C.reset}`,
+  `  ${C.cyan}cachelane install --proxy${C.reset}    ${C.gray}Opt in to the proxy (MCP server and hooks)${C.reset}`,
   `  ${C.cyan}cachelane proxy${C.reset}      ${C.gray}Start the interception proxy${C.reset}`,
   `  ${C.cyan}cachelane help${C.reset}       ${C.gray}Full command reference${C.reset}`,
   "",

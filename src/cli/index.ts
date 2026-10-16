@@ -24,7 +24,7 @@ import {
 import { formatDoctor, runDoctorAsync } from "./doctor.js";
 import { formatExplanation, formatSessions, formatStats, formatTopBlocks, jsonLine } from "./format.js";
 import { getBannerText, printHelp } from "./banner.js";
-import { installCachelane, uninstallCachelane } from "./install.js";
+import { installCachelane, proxyInstalled, uninstallCachelane } from "./install.js";
 import { aiderTarget } from "./install-targets/aider.js";
 import {
   cachelaneHome,
@@ -38,6 +38,12 @@ import {
 } from "../server/tools.js";
 import type { CachelaneConfig } from "../types/index.js";
 import type { RecordedBenchmarkReport } from "../benchmark/types.js";
+
+const INSTALL_NEXT_STEPS = [
+  "See where your input tokens went: npx cachelane-audit",
+  "Cold-cache guard, inside Claude Code: /plugin marketplace add Aditya-Tripuraneni/CacheLane, then /plugin install cachelane@cachelane",
+  "Optional request-rewriting proxy: cachelane install --proxy",
+];
 
 export interface CliIo {
   stdout: (text: string) => void;
@@ -665,7 +671,8 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
     .command("install")
     .description("Register CacheLane integration for a target tool")
     .option("--target <name>", "Install target: claude-code (default) or aider", "claude-code")
-    .action((cmd: { target?: string }) => {
+    .option("--proxy", "Install the request-rewriting proxy (MCP server, hooks, ANTHROPIC_BASE_URL)")
+    .action((cmd: { target?: string; proxy?: boolean }) => {
       const target = cmd.target ?? "claude-code";
       if (target === "aider") {
         // Aider reads its API base from the OPENAI_API_BASE process env var.
@@ -686,7 +693,12 @@ export function createCachelaneCli(options: CliOptions = {}): Command {
       if (target !== "claude-code") {
         throw new Error(`Unknown install target: ${target}`);
       }
-      io.stdout(jsonLine(installCachelane(env)));
+      // The proxy is opt-in since 1.2.0; an existing proxy install is kept on upgrade.
+      if (cmd.proxy || proxyInstalled(env)) {
+        io.stdout(jsonLine(installCachelane(env)));
+        return;
+      }
+      io.stdout(jsonLine({ changed: false, proxy: false, next_steps: INSTALL_NEXT_STEPS }));
     });
 
   program

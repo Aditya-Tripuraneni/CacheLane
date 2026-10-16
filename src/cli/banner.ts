@@ -97,7 +97,8 @@ function helpText(version: string): string {
 
   lines.push(`${C.bold}QUICK START${C.reset}`);
   lines.push("");
-  lines.push(`  ${C.cyan}cachelane install${C.reset}           ${C.gray}Register MCP server and hooks with Claude Code${C.reset}`);
+  lines.push(`  ${C.cyan}npx cachelane-audit${C.reset}         ${C.gray}See where your input tokens went and why the cache rebuilt${C.reset}`);
+  lines.push(`  ${C.cyan}cachelane install --proxy${C.reset}   ${C.gray}Opt in to the proxy (MCP server and hooks)${C.reset}`);
   lines.push(`  ${C.cyan}cachelane proxy${C.reset}             ${C.gray}Start the HTTP interception proxy (port 7332)${C.reset}`);
   lines.push(`  ${C.cyan}cachelane stats${C.reset}             ${C.gray}View cache hit rate and savings for this session${C.reset}`);
   lines.push("");
