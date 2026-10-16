@@ -217,8 +217,10 @@ function readJson(path) {
     return null;
   }
 }
+var isTypedPrompt = (prompt) => !/^\s*[<\/!]/.test(prompt ?? "");
 function promptHook(input, d) {
   try {
+    if (!isTypedPrompt(input.prompt)) return "";
     if (!input.session_id || !input.transcript_path || !existsSync(input.transcript_path)) return "";
     const state = loadState(d.statePath);
     if (!state.enabled) return "";

@@ -27,9 +27,17 @@ function readJson(path: string): unknown {
   }
 }
 
+/**
+ * Only prompts a person typed are guarded. Claude Code also routes task notifications
+ * and loop wakeups ("<..."), slash commands ("/...") and shell commands ("!...") through
+ * UserPromptSubmit; blocking those would drop background results or block /clear itself.
+ */
+const isTypedPrompt = (prompt: string | undefined): boolean => !/^\s*[<\/!]/.test(prompt ?? "");
+
 /** UserPromptSubmit. Returns stdout to print ("" = allow). Never throws. */
 export function promptHook(input: HookInput, d: HookDeps): string {
   try {
+    if (!isTypedPrompt(input.prompt)) return "";
     if (!input.session_id || !input.transcript_path || !existsSync(input.transcript_path)) return "";
     const state = loadState(d.statePath);
     if (!state.enabled) return "";

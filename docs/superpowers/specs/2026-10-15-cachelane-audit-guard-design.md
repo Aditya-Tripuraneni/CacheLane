@@ -100,6 +100,7 @@ Hooks call the bundled script by path (`${CLAUDE_PLUGIN_ROOT}/bin/cachelane-audi
    - If this idle period was already warned (`warned[session_id] == last`): allow. One warning per break; Claude Code does not restore a blocked prompt, so retyping can take minutes.
    - Otherwise: block (`{"decision":"block","reason":...}`) and set `warned[session_id] = last`.
 5. Any exception, a missing file, or more than 5 s elapsed: exit 0 (allow). The guard never blocks on its own failure.
+6. Prompts starting with `<` (task notifications, loop wakeups), `/` (slash commands) or `!` (shell commands) are always allowed; only typed prompts are guarded.
 
 **Block message** (about 8 lines)
 - How long since the cache went cold, the TTL, and the context size.

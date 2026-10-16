@@ -35,6 +35,16 @@ describe("promptHook", () => {
     expect(promptHook(input("something else"), { ...deps, now: deps.now + 60_000 })).toBe("");
   });
 
+  // Claude Code also sends task notifications, loop wakeups, slash commands and shell
+  // commands through UserPromptSubmit. Blocking them loses background results.
+  it.each([
+    ["a background-task notification", "<task-notification>\n<task-id>b1</task-id>\n</task-notification>"],
+    ["a slash command", "/compact"],
+    ["a shell command", "! ls"],
+  ])("never blocks %s", (_label, prompt) => {
+    expect(promptHook(input(prompt), setup(LAST + 2 * 3_600_000))).toBe("");
+  });
+
   it("uses the Stop timestamp as last activity", () => {
     const deps = setup(LAST + 2 * 3_600_000);
     stopHook(input(), { ...deps, now: deps.now - 60_000 });
